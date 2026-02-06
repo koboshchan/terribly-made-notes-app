@@ -34,16 +34,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only return global admin settings
+    const isAdmin = await isUserAdmin(userId);
+
     const globalSettingsCollection = await getCollection('global_settings');
     const globalSettings = await globalSettingsCollection.findOne({ type: 'models' });
 
     if (globalSettings) {
-      return NextResponse.json(globalSettings.settings);
+      const settings = globalSettings.settings;
+
+      if (!isAdmin) {
+        return NextResponse.json({
+          stt: { ...settings.stt, apiKey: '' },
+          llm: { ...settings.llm, apiKey: '' },
+          tts: { ...settings.tts, apiKey: '' },
+        });
+      }
+
+      return NextResponse.json(settings);
     }
 
-    // Fallback to defaults if no global settings exist
-    return NextResponse.json(defaultSettings);
+    const defaults = defaultSettings;
+    if (!isAdmin) {
+      return NextResponse.json({
+        stt: { ...defaults.stt, apiKey: '' },
+        llm: { ...defaults.llm, apiKey: '' },
+        tts: { ...defaults.tts, apiKey: '' },
+      });
+    }
+
+    return NextResponse.json(defaults);
   } catch (error) {
     console.error('Failed to fetch settings:', error);
     return NextResponse.json(
