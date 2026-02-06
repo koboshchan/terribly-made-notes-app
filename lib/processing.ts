@@ -326,7 +326,7 @@ export async function generateFlashcards(
     quizModel: string;
   }
 ): Promise<Flashcard[]> {
-  const prompt = `Based on the following note content, generate 5-10 flashcards.
+  const prompt = `Based on the following note content, generate flashcards thats enough to cover all information in this note.
 
 Return ONLY a valid JSON array (no markdown code blocks, no explanations):
 [
@@ -334,7 +334,7 @@ Return ONLY a valid JSON array (no markdown code blocks, no explanations):
 ]
 
 Note content:
-${content.substring(0, 10000)}
+${content.toString()}
 
 Generate flashcards that test understanding of key concepts, definitions, and important facts.`;
 
@@ -389,7 +389,7 @@ export async function generateQuiz(
     quizModel: string;
   }
 ): Promise<QuizQuestion[]> {
-  const prompt = `Based on the following note content, generate 5-10 quiz questions.
+  const prompt = `Based on the following note content, generate 5 to 10 quiz questions.
 
 Return ONLY a valid JSON object with a 'questions' array (no markdown code blocks, no explanations):
 {
@@ -398,13 +398,14 @@ Return ONLY a valid JSON object with a 'questions' array (no markdown code block
       "question": "Question text",
       "wrongAnswers": ["Wrong answer 1", "Wrong answer 2", "Wrong answer 3"],
       "correctAnswer": "Correct answer",
-      "explanation": "Brief explanation of why this is correct"
+      "explanation": "Brief explanation of why this is correct",
+      "hint": "If the user is stuck, they can review this and get a hint."
     }
   ]
 }
 
 Note content:
-${content.substring(0, 10000)}
+${content.toString()}
 
 Generate questions that test understanding. Ensure wrong answers are plausible but incorrect.`;
 
@@ -445,7 +446,8 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
       question: q.question || '',
       wrongAnswers: q.wrongAnswers || [],
       correctAnswer: q.correctAnswer || '',
-      explanation: q.explanation || ''
+      explanation: q.explanation || '',
+      hint: q.hint || ''
     }));
   } catch (error) {
     console.error('Failed to generate quiz:', error);
