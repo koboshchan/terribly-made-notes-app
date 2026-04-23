@@ -2,7 +2,7 @@
 
 import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Note {
   _id: string;
@@ -32,6 +32,7 @@ export default function Home() {
   const [userClasses, setUserClasses] = useState<Array<{_id: string, name: string}>>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const pendingRefresh = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchNotes();
@@ -130,9 +131,13 @@ export default function Home() {
           [noteId]: progressData
         }));
 
-        // If completed, refresh notes list
-        if (progressData.status === 'completed') {
-          fetchNotes();
+        // If completed, refresh notes list after 1 second so the "completed" progress bar is visible
+        if (progressData.status === 'completed' && !pendingRefresh.current.has(noteId)) {
+          pendingRefresh.current.add(noteId);
+          setTimeout(() => {
+            pendingRefresh.current.delete(noteId);
+            fetchNotes();
+          }, 1000);
         }
       }
     } catch (error) {
