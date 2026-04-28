@@ -5,7 +5,11 @@ import crypto from 'crypto';
 import { getCollection } from '@/lib/db';
 
 function buildShareUrl(request: NextRequest, token: string) {
-  const origin = new URL(request.url).origin;
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedProto = request.headers.get('x-forwarded-proto') ?? 'https';
+  const origin = forwardedHost
+    ? `${forwardedProto.split(',')[0].trim()}://${forwardedHost.split(',')[0].trim()}`
+    : new URL(request.url).origin;
   return `${origin}/shared/${token}`;
 }
 
