@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   app:
+    image: ghcr.io/zlc1004/terribly-made-notes-app:main
     build: .
     ports:
       - "3000:3000"
