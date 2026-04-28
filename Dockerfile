@@ -21,7 +21,7 @@ COPY ./public ./public
 COPY ./lib ./lib
 COPY ./next.config.js .
 COPY ./tsconfig.json .
-COPY ./middleware.ts .
+COPY ./proxy.ts .
 
 # Build the app
 RUN npm run build
