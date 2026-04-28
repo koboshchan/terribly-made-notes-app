@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   app:
-    image: ghcr.io/zlc1004/terribly-made-notes-app:main
+    image: ghcr.io/koboshchan/terribly-made-notes-app:main
     build:
       context: .
       args:
