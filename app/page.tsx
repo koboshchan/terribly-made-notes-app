@@ -32,6 +32,8 @@ export default function Home() {
   const [userClasses, setUserClasses] = useState<Array<{_id: string, name: string}>>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [bulkShareLink, setBulkShareLink] = useState<string>('');
+  const [bulkShareLoading, setBulkShareLoading] = useState(false);
   const pendingRefresh = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -180,6 +182,46 @@ export default function Home() {
     );
   };
 
+  const selectedShareableIds = selectedNoteIds.filter((id) => {
+    const note = notes.find((n) => n._id === id);
+    return note?.status === 'completed';
+  });
+
+  const createBulkShareLink = async () => {
+    if (selectedShareableIds.length === 0 || bulkShareLoading) return;
+
+    setBulkShareLoading(true);
+    try {
+      const response = await fetch('/api/notes/share-bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ noteIds: selectedShareableIds }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create bulk share link');
+      }
+
+      const data = await response.json();
+      setBulkShareLink(data.shareUrl);
+
+      try {
+        await navigator.clipboard.writeText(data.shareUrl);
+        alert('Bulk share link copied to clipboard!');
+      } catch (clipboardError) {
+        console.warn('Clipboard not available:', clipboardError);
+        alert(`Bulk share link created: ${data.shareUrl}`);
+      }
+    } catch (error) {
+      console.error('Failed to create bulk share link:', error);
+      alert('Failed to create bulk share link. Please try again.');
+    } finally {
+      setBulkShareLoading(false);
+    }
+  };
+
   return (
     <div className="container">
       <SignedOut>
@@ -239,9 +281,29 @@ export default function Home() {
               >
                 Chat with Selected ({selectedNoteIds.length})
               </Link>
+              <button
+                onClick={createBulkShareLink}
+                className="btn btn-secondary"
+                disabled={selectedShareableIds.length === 0 || bulkShareLoading}
+              >
+                {bulkShareLoading ? 'Creating link...' : `Share Selected (${selectedShareableIds.length})`}
+              </button>
             </>
           )}
         </div>
+
+        {isSelectionMode && bulkShareLink && (
+          <div className="card bulk-share-link-card">
+            <p className="bulk-share-link-title">Bulk share link</p>
+            <input
+              type="text"
+              readOnly
+              value={bulkShareLink}
+              className="form-input"
+              aria-label="Bulk share link"
+            />
+          </div>
+        )}
 
         <div className="card">
           <div style={{

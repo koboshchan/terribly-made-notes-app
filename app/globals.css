@@ -514,6 +514,23 @@ body {
   flex: 1;
 }
 
+.bulk-share-link-card {
+  margin-bottom: 16px;
+}
+
+.bulk-share-link-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.shared-bulk-title {
+  margin-bottom: 16px;
+}
+
+.shared-flex-spacer {
+  flex: 1;
+}
+
 /* Mobile-specific responsive utilities */
 @media (max-width: 768px) {
   /* Stack controls vertically on small screens */
