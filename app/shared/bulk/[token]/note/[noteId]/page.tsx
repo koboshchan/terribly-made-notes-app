@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface SharedNote {
   _id: string;
@@ -21,7 +20,7 @@ export default function SharedBulkNotePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    marked.use(markedKatex({ throwOnError: false, output: 'html' }));
+    setupMarkdownRenderer();
 
     const fetchNote = async () => {
       try {
@@ -96,7 +95,7 @@ export default function SharedBulkNotePage() {
         </div>
         <div
           className="markdown-content"
-          dangerouslySetInnerHTML={{ __html: marked(note.content) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }}
         />
       </div>
     </div>

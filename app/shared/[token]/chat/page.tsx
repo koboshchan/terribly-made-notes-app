@@ -2,8 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface SharedNote {
   title: string;
@@ -26,20 +25,7 @@ export default function SharedNoteChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const loadMhchem = async () => {
-      try {
-        // @ts-ignore - mhchem extension doesn't have TypeScript declarations but works
-        await import('katex/contrib/mhchem');
-      } catch (e) {
-        console.warn('Could not load mhchem extension:', e);
-      }
-    };
-    loadMhchem();
-
-    marked.use(markedKatex({
-      throwOnError: false,
-      output: 'html'
-    }));
+    setupMarkdownRenderer();
 
     fetchSharedNote();
   }, []);
@@ -153,7 +139,7 @@ export default function SharedNoteChatPage() {
               ) : (
                 <div
                   className="markdown-content shared-chat-assistant-bubble"
-                  dangerouslySetInnerHTML={{ __html: marked(msg.content) }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                 />
               )}
             </div>

@@ -2,8 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface SharedNote {
   title: string;
@@ -20,20 +19,7 @@ export default function SharedNotePage() {
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
-    const loadMhchem = async () => {
-      try {
-        // @ts-ignore - mhchem extension doesn't have TypeScript declarations but works
-        await import('katex/contrib/mhchem');
-      } catch (e) {
-        console.warn('Could not load mhchem extension:', e);
-      }
-    };
-    loadMhchem();
-
-    marked.use(markedKatex({
-      throwOnError: false,
-      output: 'html'
-    }));
+    setupMarkdownRenderer();
 
     fetchSharedNote();
   }, []);
@@ -118,7 +104,7 @@ export default function SharedNotePage() {
 
         <div
           className="markdown-content"
-          dangerouslySetInnerHTML={{ __html: marked(note.content) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }}
         />
       </div>
     </div>

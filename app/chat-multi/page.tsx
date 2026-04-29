@@ -2,9 +2,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
-import { marked } from "marked";
-import markedKatex from "marked-katex-extension";
-import "katex/dist/contrib/mhchem";
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface Note {
   _id: string;
@@ -35,20 +33,7 @@ function MultiNoteChatContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const loadMhchem = async () => {
-      try {
-        // @ts-ignore
-        await import('katex/contrib/mhchem');
-      } catch (e) {
-        console.warn('Could not load mhchem extension:', e);
-      }
-    };
-    loadMhchem();
-
-    marked.use(markedKatex({
-      throwOnError: false,
-      output: 'html'
-    }));
+    setupMarkdownRenderer();
 
     if (noteIds.length > 0) {
       fetchNotesContent(noteIds);
@@ -240,7 +225,7 @@ function MultiNoteChatContent() {
                     borderRadius: '12px',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                   }}
-                  dangerouslySetInnerHTML={{ __html: marked(msg.content) }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                 />
               )}
             </div>

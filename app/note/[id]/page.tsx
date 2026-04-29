@@ -3,8 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect } from "react";
-import { marked } from "marked";
-import markedKatex from "marked-katex-extension";
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface Note {
   _id: string;
@@ -60,20 +59,7 @@ export default function NotePage({
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
 
   useEffect(() => {
-    const loadMhchem = async () => {
-      try {
-        // @ts-ignore - mhchem extension doesn't have TypeScript declarations but works
-        await import('katex/contrib/mhchem');
-      } catch (e) {
-        console.warn('Could not load mhchem extension:', e);
-      }
-    };
-    loadMhchem();
-
-    marked.use(markedKatex({
-      throwOnError: false,
-      output: 'html'
-    }));
+    setupMarkdownRenderer();
 
     const initPage = async () => {
       if (isLoaded && !isSignedIn) {
@@ -465,7 +451,7 @@ export default function NotePage({
         ) : (
           <div
             className={`markdown-content ${noteClass}`}
-            dangerouslySetInnerHTML={{ __html: marked(note.content) }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }}
           />
         )}
 

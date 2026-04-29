@@ -3,9 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { marked } from "marked";
-import markedKatex from "marked-katex-extension";
-import "katex/dist/contrib/mhchem";
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface Note {
   _id: string;
@@ -33,20 +31,7 @@ export default function NoteChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const loadMhchem = async () => {
-      try {
-        // @ts-ignore - mhchem extension doesn't have TypeScript declarations but works
-        await import('katex/contrib/mhchem');
-      } catch (e) {
-        console.warn('Could not load mhchem extension:', e);
-      }
-    };
-    loadMhchem();
-
-    marked.use(markedKatex({
-      throwOnError: false,
-      output: 'html'
-    }));
+    setupMarkdownRenderer();
 
     const initPage = async () => {
       if (isLoaded && !isSignedIn) {
@@ -176,7 +161,7 @@ export default function NoteChatPage() {
             <div 
               className="markdown-content"
               style={{ maxHeight: '70vh', overflowY: 'auto' }}
-              dangerouslySetInnerHTML={{ __html: marked(note.content) }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }}
             />
           </div>
         )}
@@ -231,7 +216,7 @@ export default function NoteChatPage() {
                       borderRadius: '12px',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                     }}
-                    dangerouslySetInnerHTML={{ __html: marked(msg.content) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                   />
                 )}
               </div>

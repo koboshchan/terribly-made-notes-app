@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
+import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -23,7 +22,7 @@ function SharedBulkChatContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    marked.use(markedKatex({ throwOnError: false, output: 'html' }));
+    setupMarkdownRenderer();
 
     setChatMessages([
       {
@@ -137,7 +136,7 @@ function SharedBulkChatContent() {
               ) : (
                 <div
                   className="markdown-content shared-chat-assistant-bubble"
-                  dangerouslySetInnerHTML={{ __html: marked(msg.content) }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                 />
               )}
             </div>
