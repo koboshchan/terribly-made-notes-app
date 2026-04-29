@@ -21,6 +21,7 @@ COPY ./public ./public
 COPY ./lib ./lib
 COPY ./next.config.js .
 COPY ./tsconfig.json .
+COPY ./katex-mhchem.d.ts .
 COPY ./proxy.ts .
 
 # Build the app
