@@ -120,6 +120,7 @@ export default function AdminModelsPage() {
         }
 
         setSettings(data);
+        await preloadModels(data);
         setIsAdmin(true);
       }
     } catch (error) {
@@ -149,6 +150,14 @@ export default function AdminModelsPage() {
     } catch (error) {
       console.error('Failed to fetch models:', error);
     }
+  };
+
+  const preloadModels = async (loadedSettings: ModelSettings) => {
+    await Promise.all([
+      fetchModels(loadedSettings.stt.baseUrl, loadedSettings.stt.apiKey, 'stt'),
+      fetchModels(loadedSettings.llm.baseUrl, loadedSettings.llm.apiKey, 'llm'),
+      fetchModels(loadedSettings.tts.baseUrl, loadedSettings.tts.apiKey, 'tts'),
+    ]);
   };
 
   const saveSettings = async () => {
@@ -255,7 +264,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.stt.baseUrl}
               onChange={(e) => updateSettings('stt', 'baseUrl', e.target.value)}
-              onBlur={() => fetchModels(settings.stt.baseUrl, settings.stt.apiKey, 'stt')}
             />
           </div>
 
@@ -266,7 +274,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.stt.apiKey}
               onChange={(e) => updateSettings('stt', 'apiKey', e.target.value)}
-              onBlur={() => fetchModels(settings.stt.baseUrl, settings.stt.apiKey, 'stt')}
             />
           </div>
 
@@ -392,7 +399,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.llm.baseUrl}
               onChange={(e) => updateSettings('llm', 'baseUrl', e.target.value)}
-              onBlur={() => fetchModels(settings.llm.baseUrl, settings.llm.apiKey, 'llm')}
             />
           </div>
 
@@ -403,7 +409,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.llm.apiKey}
               onChange={(e) => updateSettings('llm', 'apiKey', e.target.value)}
-              onBlur={() => fetchModels(settings.llm.baseUrl, settings.llm.apiKey, 'llm')}
             />
           </div>
 
@@ -496,7 +501,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.tts.baseUrl}
               onChange={(e) => updateSettings('tts', 'baseUrl', e.target.value)}
-              onBlur={() => fetchModels(settings.tts.baseUrl, settings.tts.apiKey, 'tts')}
             />
           </div>
 
@@ -507,7 +511,6 @@ export default function AdminModelsPage() {
               className="form-input"
               value={settings.tts.apiKey}
               onChange={(e) => updateSettings('tts', 'apiKey', e.target.value)}
-              onBlur={() => fetchModels(settings.tts.baseUrl, settings.tts.apiKey, 'tts')}
             />
           </div>
 
