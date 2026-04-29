@@ -133,12 +133,23 @@ export default function Home() {
           [noteId]: progressData
         }));
 
-        // If completed, refresh notes list after 1 second so the "completed" progress bar is visible
+        // If completed, fetch the individual note after 1 second and replace the progress bar in-place
         if (progressData.status === 'completed' && !pendingRefresh.current.has(noteId)) {
           pendingRefresh.current.add(noteId);
-          setTimeout(() => {
+          setTimeout(async () => {
             pendingRefresh.current.delete(noteId);
-            fetchNotes();
+            try {
+              const noteRes = await fetch(`/api/notes/${noteId}`);
+              if (noteRes.ok) {
+                const data = await noteRes.json();
+                const updatedNote: Note = { ...data, noteClass: data.class ?? data.noteClass };
+                setNotes(prev => prev.map(n => n._id === noteId ? updatedNote : n));
+                setFilteredNotes(prev => prev.map(n => n._id === noteId ? updatedNote : n));
+              }
+            } catch {
+              // fall back to full refresh if individual fetch fails
+              fetchNotes();
+            }
           }, 1000);
         }
       }
