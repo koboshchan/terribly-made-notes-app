@@ -111,7 +111,7 @@ export async function POST(
         content: m.content,
       })),
       temperature: 0.7,
-      maxTokens: 2000,
+      maxOutputTokens: 2000,
     });
 
     return NextResponse.json({ message: result.text });

@@ -80,7 +80,7 @@ Provide clear, concise, and helpful answers based on the note content above. If 
         content: m.content
       })),
       temperature: 0.7,
-      maxTokens: 2000,
+      maxOutputTokens: 2000,
     });
 
     return NextResponse.json({
