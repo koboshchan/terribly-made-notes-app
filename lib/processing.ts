@@ -184,7 +184,7 @@ ${text}`;
       schema,
       prompt,
       temperature: 0.7,
-      maxTokens: 50000,
+      maxOutputTokens: 50000,
     });
 
     // Validate the response structure
@@ -221,6 +221,8 @@ export async function generateFlashcards(
     baseUrl: string;
     apiKey: string;
     quizModel: string;
+    chatModel?: string;
+    summarizationModel?: string;
   }
 ): Promise<Flashcard[]> {
   const prompt = `Based on the following note content, generate flashcards that cover all information in this note.
@@ -245,7 +247,7 @@ Generate flashcards that test understanding of key concepts, definitions, and im
       schema,
       prompt,
       temperature: 0.3,
-      maxTokens: 4000,
+      maxOutputTokens: 4000,
     });
 
     return result.object.flashcards;
@@ -261,6 +263,8 @@ export async function generateQuiz(
     baseUrl: string;
     apiKey: string;
     quizModel: string;
+    chatModel?: string;
+    summarizationModel?: string;
   }
 ): Promise<QuizQuestion[]> {
   const prompt = `Based on the following note content, generate 5 to 10 quiz questions.
@@ -288,7 +292,7 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
       schema,
       prompt,
       temperature: 0.3,
-      maxTokens: 4000,
+      maxOutputTokens: 4000,
     });
 
     return result.object.questions.map((q: any) => ({

@@ -29,6 +29,7 @@ export interface TTSSettings {
  */
 export function getLanguageModel(settings: LLMSettings, modelName: string): LanguageModel {
   const client = createOpenAICompatible({
+    name: 'openai-compatible',
     baseURL: settings.baseUrl.replace(/\/+$/, ''),
     apiKey: settings.apiKey,
   });
@@ -40,21 +41,21 @@ export function getLanguageModel(settings: LLMSettings, modelName: string): Lang
  * Get chat model for chat completions
  */
 export function getChatModel(settings: LLMSettings): LanguageModel {
-  return getLanguageModel(settings, settings.chatModel);
+  return getLanguageModel(settings, settings.chatModel!);
 }
 
 /**
  * Get summarization model
  */
 export function getSummarizationModel(settings: LLMSettings): LanguageModel {
-  return getLanguageModel(settings, settings.summarizationModel);
+  return getLanguageModel(settings, settings.summarizationModel!);
 }
 
 /**
  * Get quiz model
  */
 export function getQuizModel(settings: LLMSettings): LanguageModel {
-  return getLanguageModel(settings, settings.quizModel);
+  return getLanguageModel(settings, settings.quizModel!);
 }
 
 /**
