@@ -11,11 +11,16 @@ interface SharedNoteSummary {
   createdAt: string;
 }
 
+interface SharedNoteContent extends SharedNoteSummary {
+  content: string;
+}
+
 export default function SharedBulkPage() {
   const { token } = useParams<{ token: string }>();
   const [notes, setNotes] = useState<SharedNoteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
   useEffect(() => {
     const fetchSharedSet = async () => {
@@ -49,6 +54,63 @@ export default function SharedBulkPage() {
     });
   };
 
+  const sanitizeFileName = (value: string) => {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'shared-notes';
+  };
+
+  const downloadAllNotes = async () => {
+    if (!token || notes.length === 0) {
+      return;
+    }
+
+    setDownloadingAll(true);
+    try {
+      const detailResponses = await Promise.all(
+        notes.map((note) =>
+          fetch(`/api/shared-bulk/${token}/notes/${note._id}`).then(async (response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to fetch note ${note._id}`);
+            }
+            return response.json() as Promise<SharedNoteContent>;
+          })
+        )
+      );
+
+      const sections = detailResponses.map((note, index) => {
+        const createdDate = new Date(note.createdAt).toLocaleString();
+        return [
+          `# ${index + 1}. ${note.title}`,
+          '',
+          `${note.description}`,
+          '',
+          `Created: ${createdDate}`,
+          '',
+          '---',
+          '',
+          note.content,
+        ].join('\n');
+      });
+
+      const fullMarkdown = sections.join('\n\n\n');
+      const blob = new Blob([fullMarkdown], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${sanitizeFileName(String(token))}-all-notes.md`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      console.error('Failed to download all shared notes:', downloadError);
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container">
@@ -76,6 +138,13 @@ export default function SharedBulkPage() {
         <Link href={`/shared/bulk/${token}/chat`} className="btn btn-primary">
           Chat With All Notes
         </Link>
+        <button
+          onClick={downloadAllNotes}
+          className="btn btn-secondary"
+          disabled={downloadingAll || notes.length === 0}
+        >
+          {downloadingAll ? 'Preparing download...' : 'Download All (.md)'}
+        </button>
       </div>
 
       <div className="card">

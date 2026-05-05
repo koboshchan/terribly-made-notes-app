@@ -17,6 +17,7 @@ export default function SharedNotePage() {
   const [note, setNote] = useState<SharedNote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
+  const [copying, setCopying] = useState(false);
 
   useEffect(() => {
     setupMarkdownRenderer();
@@ -57,6 +58,41 @@ export default function SharedNotePage() {
     });
   };
 
+  const sanitizeFileName = (value: string) => {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'shared-note';
+  };
+
+  const buildMarkdown = (sharedNote: SharedNote) => {
+    return `# ${sharedNote.title}\n\n${sharedNote.description}\n\n---\n\n${sharedNote.content}`;
+  };
+
+  const downloadMarkdown = (sharedNote: SharedNote) => {
+    const markdown = buildMarkdown(sharedNote);
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${sanitizeFileName(sharedNote.title)}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const copyNote = async (sharedNote: SharedNote) => {
+    setCopying(true);
+    try {
+      await navigator.clipboard.writeText(buildMarkdown(sharedNote));
+    } catch (copyError) {
+      console.error('Failed to copy note:', copyError);
+    } finally {
+      setCopying(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container">
@@ -86,6 +122,19 @@ export default function SharedNotePage() {
           className="btn btn-secondary"
         >
           💬 Open Chat
+        </button>
+        <button
+          onClick={() => copyNote(note)}
+          className="btn btn-secondary"
+          disabled={copying}
+        >
+          {copying ? 'Copying...' : 'Copy Note'}
+        </button>
+        <button
+          onClick={() => downloadMarkdown(note)}
+          className="btn btn-primary"
+        >
+          Download as .md
         </button>
       </div>
 
