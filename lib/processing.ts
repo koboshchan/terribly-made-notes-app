@@ -318,6 +318,14 @@ export interface QuizQuestion {
   explanation: string;
 }
 
+interface ParsedQuizQuestion {
+  question?: string;
+  wrongAnswers?: string[];
+  correctAnswer?: string;
+  explanation?: string;
+  hint?: string;
+}
+
 export async function generateFlashcards(
   content: string,
   settings: {
@@ -371,7 +379,7 @@ Generate flashcards that test understanding of key concepts, definitions, and im
       responseContent = jsonMatch[0];
     }
 
-    responseContent = responseContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').replace(/```$/g, '').trim();
+    responseContent = responseContent.replace(/```(?:json)?\n?|\n?```$/g, '').trim();
 
     const flashcards = JSON.parse(responseContent);
     return Array.isArray(flashcards) ? flashcards : [];
@@ -437,12 +445,12 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
     }
 
     // Try to extract JSON
-    responseContent = responseContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').replace(/```$/g, '').trim();
+    responseContent = responseContent.replace(/```(?:json)?\n?|\n?```$/g, '').trim();
 
     const parsed = JSON.parse(responseContent);
     const questions = parsed.questions || [];
     
-    return questions.map((q: any) => ({
+    return questions.map((q: ParsedQuizQuestion) => ({
       question: q.question || '',
       wrongAnswers: q.wrongAnswers || [],
       correctAnswer: q.correctAnswer || '',
