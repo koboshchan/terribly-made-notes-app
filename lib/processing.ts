@@ -326,7 +326,7 @@ export async function generateFlashcards(
     quizModel: string;
   }
 ): Promise<Flashcard[]> {
-  const prompt = `Based on the following note content, generate flashcards thats enough to cover all information in this note.
+  const prompt = `Based on the following note content, generate enough flashcards to cover all information in this note.
 
 Return ONLY a valid JSON array (no markdown code blocks, no explanations):
 [
@@ -440,7 +440,7 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
     responseContent = responseContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').replace(/```$/g, '').trim();
 
     const parsed = JSON.parse(responseContent);
-    const questions = parsed.questions || parsed.questions || [];
+    const questions = parsed.questions || [];
     
     return questions.map((q: any) => ({
       question: q.question || '',
