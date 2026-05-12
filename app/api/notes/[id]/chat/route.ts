@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
-import { generateText } from 'ai';
-import { getChatModel } from '@/lib/ai';
 
 export async function POST(
   request: NextRequest,
@@ -65,26 +63,31 @@ Provide clear, concise, and helpful answers based on the note content above. If 
     // Add current message
     messages.push({ role: 'user', content: message });
 
-    const model = getChatModel({
-      baseUrl: llmSettings.baseUrl,
-      apiKey: llmSettings.apiKey,
-      chatModel: llmSettings.chatModel,
-      summarizationModel: llmSettings.summarizationModel,
-      quizModel: llmSettings.quizModel,
+    const response = await fetch(`${llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${llmSettings.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: llmSettings.chatModel,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        temperature: 0.7,
+        max_tokens: 2000,
+      }),
     });
 
-    const result = await generateText({
-      model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content
-      })),
-      temperature: 0.7,
-      maxOutputTokens: 2000,
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Chat API error:', response.status, errorText);
+      return NextResponse.json({ error: 'Chat failed' }, { status: 500 });
+    }
+
+    const data = await response.json();
+    const assistantMessage = data.choices[0]?.message?.content;
 
     return NextResponse.json({
-      message: result.text,
+      message: assistantMessage,
     });
   } catch (error) {
     console.error('Failed to process chat:', error);
