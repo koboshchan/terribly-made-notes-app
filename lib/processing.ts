@@ -358,7 +358,6 @@ Generate flashcards that test understanding of key concepts, definitions, and im
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         max_tokens: 4000,
-        response_format: { type: 'json_object' },
       }),
     });
 
@@ -374,7 +373,7 @@ Generate flashcards that test understanding of key concepts, definitions, and im
     }
 
     // Try to extract JSON array
-    const jsonMatch = responseContent.match(/\[[\s\S]*\]/);
+    const jsonMatch = responseContent.match(/\[[\s\S]*?\]/);
     if (jsonMatch) {
       responseContent = jsonMatch[0];
     }
@@ -452,7 +451,7 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
     
     return questions.map((q: ParsedQuizQuestion) => ({
       question: q.question || '',
-      wrongAnswers: q.wrongAnswers || [],
+      wrongAnswers: Array.isArray(q.wrongAnswers) ? q.wrongAnswers : [],
       correctAnswer: q.correctAnswer || '',
       explanation: q.explanation || '',
       hint: q.hint || ''
