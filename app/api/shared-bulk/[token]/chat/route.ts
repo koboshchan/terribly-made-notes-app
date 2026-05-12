@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
-import { generateText } from 'ai';
-import { getChatModel } from '@/lib/ai';
 
 type SharedSet = {
   noteIds: ObjectId[];
@@ -96,25 +94,28 @@ export async function POST(
 
     messages.push({ role: 'user', content: message });
 
-    const model = getChatModel({
-      baseUrl: llmSettings.baseUrl,
-      apiKey: llmSettings.apiKey,
-      chatModel: llmSettings.chatModel,
-      summarizationModel: llmSettings.summarizationModel,
-      quizModel: llmSettings.quizModel,
+    const response = await fetch(`${llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${llmSettings.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: llmSettings.chatModel,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        temperature: 0.7,
+        max_tokens: 2000,
+      }),
     });
 
-    const result = await generateText({
-      model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      temperature: 0.7,
-      maxOutputTokens: 2000,
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Shared bulk chat API error:', response.status, errorText);
+      return NextResponse.json({ error: 'Chat failed' }, { status: 500 });
+    }
 
-    return NextResponse.json({ message: result.text });
+    const data = await response.json();
+    return NextResponse.json({ message: data.choices[0]?.message?.content });
   } catch (error) {
     console.error('Failed to process shared bulk chat:', error);
     return NextResponse.json({ error: 'Failed to process shared bulk chat' }, { status: 500 });
