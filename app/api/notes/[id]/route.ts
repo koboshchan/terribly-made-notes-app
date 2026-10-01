@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
+import { processingQueue } from '@/lib/queue';
 import { deleteDir, getNoteDir } from '@/lib/storage';
 
 export async function GET(
@@ -59,6 +60,9 @@ export async function DELETE(
     }
 
     const notesCollection = await getCollection('notes');
+    const owned = await notesCollection.findOne({ _id: new ObjectId(id), userId });
+    if (!owned) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+    await processingQueue.cancel(`${userId}_${id}`);
     const result = await notesCollection.deleteOne({
       _id: new ObjectId(id),
       userId,
@@ -107,7 +111,7 @@ export async function PATCH(
         userId,
       },
       {
-        $set: { noteClass: noteClass },
+        $set: { noteClass: noteClass, classificationSource: 'manual' },
       }
     );
 

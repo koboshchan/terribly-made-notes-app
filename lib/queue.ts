@@ -121,6 +121,28 @@ class ProcessingQueue {
     return true;
   }
 
+  async cancel(id: string): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateOne({ id }, { $set: { cancelled: true } });
+    // Keep the directory until active work acknowledges cancellation or its lease expires.
+    for (let i = 0; i < 120; i++) {
+      const job = await jobs.findOne({ id });
+      if (!job || !job.leaseOwner || job.leaseUntil < new Date()) {
+        await jobs.updateOne({ id }, { $set: { stageStatus: 'error', status: 'error', error: 'Cancelled' } });
+        this.queue = this.queue.filter(q => q.id !== id);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error('Cancellation is pending; retry deletion after the worker stops');
+  }
+
+  private async assertActive(item: QueueItem): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    const job = await jobs.findOne({ id: item.id, leaseOwner: this.workerId, cancelled: { $ne: true } });
+    if (!job) throw new Error('Job cancelled or lease lost');
+  }
+
   getItem(id: string): QueueItem | undefined {
     return this.queue.find(item => item.id === id);
   }
@@ -221,7 +243,7 @@ class ProcessingQueue {
         this.needsRedispatch = false;
         const jobs = await getCollection('processing_jobs');
         await jobs.updateMany({ stageStatus: 'active', leaseUntil: { $lt: new Date() } }, { $set: { stageStatus: 'waiting', leaseOwner: null } });
-        const pending = await jobs.find({ stageStatus: 'waiting' }).toArray();
+        const pending = await jobs.find({ stageStatus: 'waiting', cancelled: { $ne: true } }).toArray();
         for (const doc of pending) {
           if (!this.queue.some(q => q.id === doc.id && q.stageStatus === 'active')) {
             this.queue = this.queue.filter(q => q.id !== doc.id);
@@ -273,10 +295,11 @@ class ProcessingQueue {
 
   private async executeStage(item: QueueItem, stage: PipelineStage): Promise<void> {
     const jobs = await getCollection('processing_jobs');
-    const claim = await jobs.findOneAndUpdate({ id: item.id, stageStatus: 'waiting' }, { $set: { stageStatus: 'active', leaseOwner: this.workerId, leaseUntil: new Date(Date.now() + 60000) } }, { returnDocument: 'after' });
+    const claim = await jobs.findOneAndUpdate({ id: item.id, stageStatus: 'waiting', cancelled: { $ne: true } }, { $set: { stageStatus: 'active', leaseOwner: this.workerId, leaseUntil: new Date(Date.now() + 60000) } }, { returnDocument: 'after' });
     if (!claim) { this.queue = this.queue.filter(q => q !== item); return; }
     const heartbeat = setInterval(() => { void jobs.updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { leaseUntil: new Date(Date.now() + 60000), progress: item.progress } }).catch(console.error); }, 15000);
     try {
+      await this.assertActive(item);
       if (stage === 'audioNormalization') {
         await this.executeAudioNormalization(item);
       } else if (stage === 'transcription') {
@@ -360,6 +383,7 @@ class ProcessingQueue {
       temperature: selectedModel.temperature,
     });
 
+    await this.assertActive(item);
     item.transcription = transcription;
     const { saveFile } = await import('./storage');
     saveFile(item.markdownPath.replace(/\.md$/, '.txt'), transcription);
@@ -390,6 +414,7 @@ class ProcessingQueue {
 
     item.progress = 75;
     const summary = await summarizeText(item.transcription, settings.llm, userClasses, 'summarization');
+    await this.assertActive(item);
     item.summary = summary;
     item.progress = 90;
 
@@ -432,6 +457,7 @@ class ProcessingQueue {
       generateQuiz(item.summary.content, settings.llm),
     ]);
 
+    await this.assertActive(item);
     item.progress = 98;
     const notesCollection = await getCollection('notes');
     const updateData: any = {
