@@ -66,9 +66,20 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchNotes();
     fetchUserClasses();
   }, []);
+
+  // Server-side search/sort/class: reset to page 0 on change (debounced for typing)
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    const delay = firstQuery.current ? 0 : 300;
+    firstQuery.current = false;
+    const t = setTimeout(() => fetchNotes(0), delay);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, sortBy, sortOrder, classFilter]);
+
+  useEffect(() => () => fetchAbort.current?.abort(), []);
 
   const fetchUserClasses = async () => {
     try {
@@ -84,21 +95,45 @@ export default function Home() {
 
   useEffect(() => {
     // Poll progress for processing notes
+    // Visibility-aware, backing off from 2s to 15s; pauses while tab is hidden
     const processingNotes = notes.filter(note => note.status === 'processing');
-    if (processingNotes.length > 0) {
-      const interval = setInterval(() => {
-        processingNotes.forEach(note => {
-          fetchProgress(note._id);
-        });
-      }, 2000);
-
-      return () => clearInterval(interval);
-    }
+    if (processingNotes.length === 0) return;
+    let delay = 2000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible') {
+        await Promise.all(processingNotes.map(note => fetchProgress(note._id)));
+        delay = Math.min(Math.round(delay * 1.5), 15000);
+      }
+      if (!cancelled) timer = setTimeout(tick, delay);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        clearTimeout(timer);
+        delay = 2000;
+        tick();
+      }
+    };
+    timer = setTimeout(tick, delay);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [notes]);
 
   const PAGE_SIZE = 50;
 
+  const fetchAbort = useRef<AbortController | null>(null);
+
   const fetchNotes = async (pageToLoad = 0) => {
+    // Abort any in-flight request so stale results never overwrite newer ones
+    fetchAbort.current?.abort();
+    const controller = new AbortController();
+    fetchAbort.current = controller;
     if (pageToLoad > 0) setLoadingMore(true);
     try {
       const params = new URLSearchParams({
@@ -108,9 +143,13 @@ export default function Home() {
         page: String(pageToLoad),
         limit: String(PAGE_SIZE),
       });
-      const response = await fetch(`/api/notes?${params}`);
+      if (classFilter !== 'all') params.set('class', classFilter);
+      const response = await fetch(`/api/notes?${params}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (response.ok) {
-        const data: Note[] = (await response.json()).map((n: Note & { class?: string }) => ({ ...n, noteClass: n.class ?? n.noteClass }));
+        const json = await response.json();
+        if (controller.signal.aborted) return;
+        const data: Note[] = json.map((n: Note & { class?: string }) => ({ ...n, noteClass: n.class ?? n.noteClass }));
         setHasMore(response.headers.get('X-Has-More') === 'true');
         setPage(pageToLoad);
         if (pageToLoad === 0) {
@@ -124,10 +163,13 @@ export default function Home() {
         }
       }
     } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return;
       console.error('Failed to fetch notes:', error);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (fetchAbort.current === controller) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -135,41 +177,14 @@ export default function Home() {
     if (!loadingMore && hasMore) fetchNotes(page + 1);
   };
 
-  // Filter and sort notes when search term or sort options change
+  // Server already applies search/sort/class; only re-apply class locally so
+  // in-place note updates (e.g. reclassification) stay consistent.
   useEffect(() => {
-    let filtered = [...notes];
-
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter(note =>
-        note.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        note.description.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply class filter
-    if (classFilter !== 'all') {
-      if (classFilter === 'unclassified') {
-        filtered = filtered.filter(note => !note.noteClass);
-      } else {
-        filtered = filtered.filter(note => note.noteClass === classFilter);
-      }
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      const dateA = sortBy === 'uploaded' ? new Date(a.createdAt) : new Date(a.recordedAt || a.createdAt);
-      const dateB = sortBy === 'uploaded' ? new Date(b.createdAt) : new Date(b.recordedAt || b.createdAt);
-
-      if (sortOrder === 'desc') {
-        return dateB.getTime() - dateA.getTime();
-      } else {
-        return dateA.getTime() - dateB.getTime();
-      }
-    });
-
-    setFilteredNotes(filtered);
-  }, [notes, searchTerm, sortBy, sortOrder, classFilter]);
+    if (classFilter === 'all') return setFilteredNotes(notes);
+    setFilteredNotes(notes.filter(note =>
+      classFilter === 'unclassified' ? !note.noteClass : note.noteClass === classFilter
+    ));
+  }, [notes, classFilter]);
 
   const fetchProgress = async (noteId: string) => {
     try {
