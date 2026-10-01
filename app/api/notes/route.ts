@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
     const direction = p.get('sortOrder') === 'asc' ? 1 : -1;
     const query: any = { userId };
     if (search) query.$or = [{ title: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
+    const noteClass = p.get('class');
+    if (noteClass === 'unclassified') query.noteClass = { $in: [null, ''] };
+    else if (noteClass && noteClass !== 'all') query.noteClass = noteClass.slice(0, 100);
     if (p.has('updatedSince')) {
       const date = new Date(p.get('updatedSince')!);
       if (!Number.isFinite(date.getTime())) return NextResponse.json({ error: 'Invalid updatedSince' }, { status: 400 });
