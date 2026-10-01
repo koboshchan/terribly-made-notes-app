@@ -19,6 +19,8 @@ export async function parseUpload(request: NextRequest, shortcut = false) {
   let data: Buffer;
   let filename: string;
   let language: unknown = request.headers.get('language')?.toLowerCase() || 'english';
+  let className: string | undefined;
+  let processingPreferences: { flashcards: boolean; quiz: boolean } | undefined;
   if (contentType.startsWith('multipart/form-data')) {
     const form = await new Request('http://upload.invalid', { method: 'POST', headers: { 'content-type': contentType }, body: new Uint8Array(bytes) }).formData();
     const entry = form.get(shortcut ? 'recording' : 'file');
@@ -26,6 +28,18 @@ export async function parseUpload(request: NextRequest, shortcut = false) {
     filename = path.basename(entry.name).slice(0, 255);
     data = Buffer.from(await entry.arrayBuffer());
     language = form.get('language') || language;
+    const manualClass = form.get('className');
+    if (manualClass !== null) {
+      if (typeof manualClass !== 'string' || manualClass.length > 100 || !manualClass.trim()) throw new RequestError('Invalid className');
+      className = manualClass.trim();
+    }
+    if (form.has('generateFlashcards') || form.has('generateQuiz')) {
+      for (const field of ['generateFlashcards', 'generateQuiz']) {
+        const value = form.get(field);
+        if (value !== null && value !== 'true' && value !== 'false') throw new RequestError('Study preference must be true or false');
+      }
+      processingPreferences = { flashcards: form.get('generateFlashcards') !== 'false', quiz: form.get('generateQuiz') !== 'false' };
+    }
   } else if (shortcut) {
     const mimeExtensions: Record<string, string> = { 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/flac': '.flac', 'audio/ogg': '.ogg', 'audio/webm': '.webm' };
     const ext = mimeExtensions[contentType.split(';')[0].trim().toLowerCase()];
@@ -36,7 +50,7 @@ export async function parseUpload(request: NextRequest, shortcut = false) {
   if (!extensions.has(path.extname(filename).toLowerCase())) throw new RequestError('Unsupported audio extension');
   if (!data.length || data.length > MAX_UPLOAD_BYTES) throw new RequestError('Audio file empty or too large', 413);
   if (language !== 'english' && language !== 'other') throw new RequestError('Invalid language');
-  return { data, filename, language: language as 'english' | 'other' };
+  return { data, filename, language: language as 'english' | 'other', className, processingPreferences };
 }
 
 export async function acceptUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null) {
@@ -63,8 +77,8 @@ export async function acceptUpload(userId: string, upload: Awaited<ReturnType<ty
     const stream = info.streams?.find((s: any) => s.codec_type === 'audio');
     const duration = Number(info.format?.duration);
     if (!stream || info.streams?.some((s: any) => s.codec_type !== 'audio' && s.disposition?.attached_pic !== 1) || !Number.isFinite(duration) || duration <= 0 || duration > (Number(process.env.MAX_AUDIO_SECONDS) || 4 * 3600)) throw new RequestError('Invalid audio or duration limit exceeded');
-    await notes.insertOne({ _id: noteId, userId, title: `Processing: ${upload.filename}`, description: 'Processing audio file...', content: '', status: 'processing', originalFileName: upload.filename, fileSize: upload.data.length, language: upload.language, duration, bitrate: Number(info.format?.bit_rate) || undefined, sampleRate: Number(stream.sample_rate) || undefined, channels: stream.channels, format: info.format?.format_name, recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), ...(source ? { source } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
-    await processingQueue.addItem({ id: `${userId}_${noteId}`, userId, noteId: noteId.toString(), originalPath, mp3Path: path.join(noteDir, 'converted.mp3'), markdownPath: path.join(noteDir, 'output.md'), language: upload.language });
+    await notes.insertOne({ _id: noteId, userId, title: `Processing: ${upload.filename}`, description: 'Processing audio file...', content: '', status: 'processing', originalFileName: upload.filename, fileSize: upload.data.length, language: upload.language, duration, bitrate: Number(info.format?.bit_rate) || undefined, sampleRate: Number(stream.sample_rate) || undefined, channels: stream.channels, format: info.format?.format_name, recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), ...(source ? { source } : {}), ...(upload.className ? { noteClass: upload.className, classificationSource: 'manual' } : {}), ...(upload.processingPreferences ? { processingPreferences: upload.processingPreferences } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
+    await processingQueue.enqueue({ id: `${userId}_${noteId}`, userId, noteId: noteId.toString(), originalPath, mp3Path: path.join(noteDir, 'converted.mp3'), markdownPath: path.join(noteDir, 'output.md'), language: upload.language });
     return { noteId: noteId.toString(), filename: upload.filename };
   } catch (error: any) {
     deleteDir(noteDir);
