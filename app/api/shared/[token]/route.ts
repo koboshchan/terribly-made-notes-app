@@ -26,6 +26,7 @@ export async function GET(
       description: note.description,
       content: note.content,
       createdAt: note.createdAt,
+      shareAllowChat: note.shareAllowChat === true,
     });
   } catch (error) {
     console.error('Failed to fetch shared note:', error);

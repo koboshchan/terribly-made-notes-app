@@ -6,6 +6,8 @@ import { activeShareFilter } from '@/lib/share';
 type SharedSet = {
   noteIds: ObjectId[];
   shareEnabled?: boolean;
+  shareAllowChat?: boolean;
+  userId: string;
 };
 
 export async function GET(
@@ -30,6 +32,7 @@ export async function GET(
     const notes = await notesCollection
       .find({
         _id: { $in: sharedSet.noteIds },
+        userId: sharedSet.userId,
         status: 'completed',
       })
       .project({ title: 1, description: 1, createdAt: 1 })
@@ -46,7 +49,7 @@ export async function GET(
         createdAt: note.createdAt,
       }));
 
-    return NextResponse.json({ notes: orderedNotes });
+    return NextResponse.json({ notes: orderedNotes, shareAllowChat: sharedSet.shareAllowChat === true });
   } catch (error) {
     console.error('Failed to fetch shared bulk notes:', error);
     return NextResponse.json({ error: 'Failed to fetch shared bulk notes' }, { status: 500 });
