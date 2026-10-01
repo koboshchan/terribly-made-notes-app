@@ -47,29 +47,20 @@ export async function POST(
       return NextResponse.json({ error: 'Original audio file not found on disk. Cannot retry.' }, { status: 400 });
     }
 
-    // Reset status in MongoDB to processing
-    await notesCollection.updateOne(
-      { _id: new ObjectId(id), userId },
-      {
-        $set: {
-          status: 'processing',
-          description: 'Retrying processing...',
-          error: null,
-          updatedAt: new Date(),
-        },
+    // A single persisted job claim prevents duplicate retries and retains completed stages.
+    const queueId = `${userId}_${id}`;
+    const jobs = await getCollection('processing_jobs');
+    const priorJob = await jobs.findOne({ id: queueId });
+    if (priorJob) {
+      if (!await processingQueue.retry(queueId)) {
+        return NextResponse.json({ error: 'Retry already claimed' }, { status: 409 });
       }
-    );
-
-    // Add to processing queue
-    processingQueue.addItem({
-      id: `${userId}_${id}`,
-      userId,
-      noteId: id,
-      originalPath,
-      mp3Path,
-      markdownPath,
-      language: note.language || 'english',
-    });
+    } else {
+      const claimed = await notesCollection.updateOne({ _id: new ObjectId(id), userId, status: 'error' }, { $set: { status: 'processing', error: null, updatedAt: new Date() } });
+      if (!claimed.modifiedCount) return NextResponse.json({ error: 'Retry already claimed' }, { status: 409 });
+      await processingQueue.enqueue({ id: queueId, userId, noteId: id, originalPath, mp3Path, markdownPath, language: note.language || 'english' });
+    }
+    await notesCollection.updateOne({ _id: new ObjectId(id), userId }, { $set: { status: 'processing', error: null, updatedAt: new Date() } });
 
     return NextResponse.json({
       message: 'Note queued for reprocessing',

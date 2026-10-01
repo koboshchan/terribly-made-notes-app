@@ -9,15 +9,19 @@ export type PipelineStage =
 export interface PipelineSettings {
   audioNormalization: {
     parallel: boolean;
+    concurrency?: number;
   };
   transcription: {
     parallel: boolean;
+    concurrency?: number;
   };
   summarization: {
     parallel: boolean;
+    concurrency?: number;
   };
   generation: {
     parallel: boolean;
+    concurrency?: number;
   };
 }
 
@@ -106,6 +110,15 @@ class ProcessingQueue {
     await jobs.createIndex({ stageStatus: 1, leaseUntil: 1, addedAt: 1 });
     await jobs.updateOne({ id: item.id }, { $setOnInsert: { ...item, status: 'queued', currentStage: 'audioNormalization', stageStatus: 'waiting', progress: 0, addedAt: Date.now(), leaseUntil: new Date(0) } }, { upsert: true });
     await this.dispatch();
+  }
+
+  async retry(id: string): Promise<boolean> {
+    const jobs = await getCollection('processing_jobs');
+    const job = await jobs.findOneAndUpdate({ id, stageStatus: 'error', leaseOwner: null }, { $set: { stageStatus: 'waiting', status: 'queued', error: null }, $inc: { attempt: 1 } }, { returnDocument: 'after' });
+    if (!job) return false;
+    this.queue = this.queue.filter(q => q.id !== id);
+    await this.dispatch();
+    return true;
   }
 
   getItem(id: string): QueueItem | undefined {
@@ -237,7 +250,7 @@ class ProcessingQueue {
             }
           } else {
             // Parallel mode: all waiting items run concurrently (up to safety limit)
-            const MAX_CONCURRENT = 10;
+            const MAX_CONCURRENT = Math.max(1, Math.min(10, pipelineSettings[stage].concurrency ?? (Number(process.env[`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`]) || 2)));
             const availableSlots = Math.max(0, MAX_CONCURRENT - activeItems.length);
             if (availableSlots > 0 && waitingItems.length > 0) {
               waitingItems.sort((a, b) => a.addedAt - b.addedAt);
