@@ -152,7 +152,7 @@ type SttSettings = Parameters<typeof transcribeSingleAudio>[1] & {
   capabilities?: { maxBytes?: number; chunkSeconds?: number; overlapSeconds?: number; format?: 'mp3' | 'wav'; sampleRate?: number; channels?: number };
 };
 
-export async function transcribeAudio(audioPath: string, settings: SttSettings): Promise<string> {
+export async function transcribeAudio(audioPath: string, settings: SttSettings, assertActive: () => Promise<void> = async () => {}): Promise<string> {
   const profile = settings.capabilities || {};
   const maxBytes = profile.maxBytes || Number(process.env.STT_MAX_BYTES) || 20 * 1024 * 1024;
   const format = profile.format || 'mp3';
@@ -163,6 +163,7 @@ export async function transcribeAudio(audioPath: string, settings: SttSettings):
   if (seconds <= 1) throw new Error('Invalid STT byte capability');
   const parts: string[] = [];
   for (let start = 0, index = 0; start < duration; start += seconds - overlap, index++) {
+    await assertActive();
     const chunk = `${audioPath}.chunk-${index}.${format}`;
     const checkpoint = `${chunk}.txt`;
     if (fileExists(checkpoint)) { parts.push(readFile(checkpoint).toString('utf8')); continue; }
@@ -171,6 +172,7 @@ export async function transcribeAudio(audioPath: string, settings: SttSettings):
       const fs = await import('fs');
       if (fs.statSync(chunk).size > maxBytes) throw new Error('STT chunk exceeds configured provider size limit');
       const text = await transcribeSingleAudio(chunk, settings);
+      await assertActive();
       saveFile(checkpoint, text);
       parts.push(text);
     } finally { deleteFile(chunk); }

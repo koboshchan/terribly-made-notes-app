@@ -385,7 +385,7 @@ class ProcessingQueue {
       task: selectedModel.task,
       temperature: selectedModel.temperature,
       capabilities: settings.stt.capabilities,
-    });
+    }, () => this.assertActive(item));
 
     await this.assertActive(item);
     item.transcription = transcription;
