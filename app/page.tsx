@@ -308,7 +308,7 @@ export default function Home() {
             + New Note
           </Link>
           <Link href="/settings" className="btn btn-secondary">
-            ⚙️ Settings
+            <span aria-hidden="true">⚙️ </span>Settings
           </Link>
           <button
             onClick={() => {
@@ -404,6 +404,7 @@ export default function Home() {
               <input
                 type="text"
                 placeholder="Search notes..."
+                aria-label="Search notes"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="form-input"
@@ -412,6 +413,7 @@ export default function Home() {
               <select
                 value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
+                aria-label="Filter by class"
                 className="form-select"
                 style={{ width: 'auto', margin: 0 }}
               >
@@ -426,6 +428,7 @@ export default function Home() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'uploaded' | 'recorded')}
+                aria-label="Sort notes by"
                 className="form-select"
                 style={{ width: 'auto', margin: 0 }}
               >
@@ -434,6 +437,8 @@ export default function Home() {
               </select>
               <button
                 onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                aria-label={sortOrder === 'desc' ? 'Sorted newest first. Switch to oldest first' : 'Sorted oldest first. Switch to newest first'}
+                title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
                 className="btn btn-secondary"
                 style={{ padding: '8px 12px', fontSize: '12px' }}
               >
@@ -463,6 +468,7 @@ export default function Home() {
                       <input
                         type="checkbox"
                         checked={selectedNoteIds.includes(note._id)}
+                        aria-label={`Select ${note.title}`}
                         onChange={() => {/* handled by onClick */}}
                         onClick={(e) => handleNoteSelection(note._id, e)}
                         style={{ marginRight: '15px', transform: 'scale(1.4)', cursor: 'pointer' }}

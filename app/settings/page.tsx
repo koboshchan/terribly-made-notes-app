@@ -230,7 +230,7 @@ export default function UserSettings() {
     <div className="container">
       <div style={{ marginBottom: '20px' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back
+          <span aria-hidden="true">← </span>Back
         </button>
       </div>
 
@@ -514,7 +514,7 @@ export default function UserSettings() {
                         color: '#3b82f6',
                         userSelect: 'none'
                       }}>
-                        📱 Show Setup Instructions
+                        <span aria-hidden="true">📱 </span>Show Setup Instructions
                       </summary>
                       <div style={{
                         marginTop: '12px',

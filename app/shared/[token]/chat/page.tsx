@@ -117,7 +117,7 @@ export default function SharedNoteChatPage() {
     <div className="container">
       <div className="shared-chat-toolbar">
         <button onClick={() => router.push(`/shared/${params.token}`)} className="btn btn-secondary">
-          ← Back to Shared Note
+          <span aria-hidden="true">← </span>Back to Shared Note
         </button>
       </div>
 
@@ -161,7 +161,7 @@ export default function SharedNoteChatPage() {
             onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
             placeholder="Ask a question about this note..."
             className="form-input"
-            aria-label="Chat input"
+            aria-label="Ask a question about this note"
             disabled={chatLoading}
           />
           <button

@@ -121,7 +121,7 @@ export default function SharedNotePage() {
           onClick={() => router.push(`/shared/${params.token}/chat`)}
           className="btn btn-secondary"
         >
-          💬 Open Chat
+          <span aria-hidden="true">💬 </span>Open Chat
         </button>
         <button
           onClick={() => copyNote(note)}

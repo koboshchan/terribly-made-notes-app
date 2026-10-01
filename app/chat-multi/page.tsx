@@ -159,7 +159,7 @@ function MultiNoteChatContent() {
     <div className="container">
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back to Notes
+          <span aria-hidden="true">← </span>Back to Notes
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={clearChat} className="btn btn-secondary">
@@ -254,6 +254,7 @@ function MultiNoteChatContent() {
             onChange={(e) => setChatInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
             placeholder="Ask a question about these notes..."
+            aria-label="Ask a question about these notes"
             className="form-input"
             style={{ flex: 1 }}
             disabled={chatLoading}

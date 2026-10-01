@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
+import { loadProgress, saveProgress, clearProgress, trimChat } from '@/lib/studyProgress';
 
 interface Note {
   _id: string;
@@ -49,7 +50,10 @@ export default function NoteChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatMessages]);
+    if (note && chatMessages.length > 1) {
+      saveProgress(`chat:${note._id}`, trimChat(chatMessages));
+    }
+  }, [chatMessages, note]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,6 +66,11 @@ export default function NoteChatPage() {
       if (response.ok) {
         const data = await response.json();
         setNote(data);
+        const saved = loadProgress<ChatMessage[]>(`chat:${data._id}`);
+        if (Array.isArray(saved) && saved.length > 0) {
+          setChatMessages(saved);
+          return;
+        }
         // Initialize chat with welcome message
         setChatMessages([{
           role: 'assistant',
@@ -119,6 +128,7 @@ export default function NoteChatPage() {
   };
 
   const clearChat = () => {
+    if (note) clearProgress(`chat:${note._id}`);
     setChatMessages([{
       role: 'assistant',
       content: `Hi! I'm here to help you with questions about "${note?.title}". What would you like to know?`
@@ -143,7 +153,7 @@ export default function NoteChatPage() {
     <div className="container">
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back to Note
+          <span aria-hidden="true">← </span>Back to Note
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={clearChat} className="btn btn-secondary">
@@ -245,6 +255,7 @@ export default function NoteChatPage() {
               onChange={(e) => setChatInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
               placeholder="Ask a question about this note..."
+              aria-label="Ask a question about this note"
               className="form-input"
               style={{ flex: 1 }}
               disabled={chatLoading}
@@ -253,6 +264,7 @@ export default function NoteChatPage() {
               onClick={sendChatMessage}
               className="btn btn-primary"
               disabled={!chatInput.trim() || chatLoading}
+              aria-label="Send message"
             >
               Send
             </button>

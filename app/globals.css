@@ -628,3 +628,8 @@ body {
 .share-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .share-list-item { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .btn:focus-visible, .form-input:focus-visible, .form-select:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+/* Note / transcript correction */
+.edit-panel { display: flex; flex-direction: column; gap: 8px; }
+.edit-textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 14px; line-height: 1.6; resize: vertical; }
+.edit-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }

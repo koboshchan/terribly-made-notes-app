@@ -158,6 +158,7 @@ function SharedBulkChatContent() {
               }
             }}
             placeholder={noteId ? 'Ask about this note...' : 'Ask about all notes...'}
+            aria-label={noteId ? 'Ask about this note' : 'Ask about all notes'}
             className="form-input"
             disabled={chatLoading}
           />
