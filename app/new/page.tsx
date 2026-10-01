@@ -18,6 +18,20 @@ export default function NewNote() {
   const [errorNoteId, setErrorNoteId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [userClasses, setUserClasses] = useState<Array<{_id: string, name: string}>>([]);
+  const [selectedClass, setSelectedClass] = useState('');
+  const [generateFlashcards, setGenerateFlashcards] = useState(true);
+  const [generateQuiz, setGenerateQuiz] = useState(true);
+  // Stable per selected file so retries of the same attempt are deduplicated server-side
+  const idempotencyKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    fetch('/api/user/classes')
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => { if (Array.isArray(data)) setUserClasses(data); })
+      .catch(() => {});
+  }, [isSignedIn]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -33,6 +47,7 @@ export default function NewNote() {
     }
 
     setFile(selectedFile);
+    idempotencyKey.current = crypto.randomUUID();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -76,6 +91,10 @@ export default function NewNote() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('language', language);
+      if (selectedClass) formData.append('className', selectedClass);
+      formData.append('generateFlashcards', String(generateFlashcards));
+      formData.append('generateQuiz', String(generateQuiz));
+      if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
 
       const xhr = new XMLHttpRequest();
 
@@ -94,7 +113,9 @@ export default function NewNote() {
           pollProgress(result.noteId);
           resolve();
         } else {
-          throw new Error('Upload failed');
+          alert('Upload failed. Please try again.');
+          setUploading(false);
+          reject(new Error('Upload failed'));
         }
       });
 
@@ -111,6 +132,7 @@ export default function NewNote() {
       });
 
       xhr.open('POST', '/api/upload');
+      xhr.setRequestHeader('Idempotency-Key', idempotencyKey.current);
       xhr.send(formData);
     });
   };
@@ -156,6 +178,7 @@ export default function NewNote() {
   };
 
   const resetUpload = () => {
+    idempotencyKey.current = null;
     setFile(null);
     setLanguage('english');
     setUploading(false);
@@ -264,6 +287,38 @@ export default function NewNote() {
                 Select the primary language of the audio
               </p>
             </div>
+
+            {userClasses.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <label className="form-label" htmlFor="upload-class" style={{ display: 'block', marginBottom: '8px' }}>
+                  Class
+                </label>
+                <select
+                  id="upload-class"
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="form-select"
+                  style={{ maxWidth: '200px', margin: '0 auto' }}
+                >
+                  <option value="">No class</option>
+                  {userClasses.map(c => (
+                    <option key={c._id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <fieldset style={{ marginBottom: '20px', border: 'none', padding: 0, display: 'flex', gap: '16px', justifyContent: 'center' }}>
+              <legend className="form-label" style={{ marginBottom: '8px', width: '100%' }}>Study materials</legend>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input type="checkbox" checked={generateFlashcards} onChange={(e) => setGenerateFlashcards(e.target.checked)} />
+                Flashcards
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input type="checkbox" checked={generateQuiz} onChange={(e) => setGenerateQuiz(e.target.checked)} />
+                Quiz
+              </label>
+            </fieldset>
 
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
               {errorNoteId ? (
