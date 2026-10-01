@@ -19,6 +19,7 @@ export default function SharedBulkNotePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  const [allowChat, setAllowChat] = useState(true);
 
   useEffect(() => {
     setupMarkdownRenderer();
@@ -38,8 +39,18 @@ export default function SharedBulkNotePage() {
       }
     };
 
+    const fetchShareSettings = async () => {
+      try {
+        const response = await fetch(`/api/shared-bulk/${token}`);
+        if (response.ok) setAllowChat((await response.json()).shareAllowChat !== false);
+      } catch {
+        // keep default; chat API enforces the setting anyway
+      }
+    };
+
     if (token && noteId) {
       fetchNote();
+      fetchShareSettings();
     }
   }, [token, noteId]);
 
@@ -115,12 +126,16 @@ export default function SharedBulkNotePage() {
         <Link href={`/shared/bulk/${token}`} className="btn btn-secondary">
           Back to List
         </Link>
-        <Link href={`/shared/bulk/${token}/chat?noteId=${noteId}`} className="btn btn-primary">
-          Chat This Note
-        </Link>
-        <Link href={`/shared/bulk/${token}/chat`} className="btn btn-secondary">
-          Chat All Notes
-        </Link>
+        {allowChat && (
+          <>
+            <Link href={`/shared/bulk/${token}/chat?noteId=${noteId}`} className="btn btn-primary">
+              Chat This Note
+            </Link>
+            <Link href={`/shared/bulk/${token}/chat`} className="btn btn-secondary">
+              Chat All Notes
+            </Link>
+          </>
+        )}
         <button
           onClick={() => copyNote(note)}
           className="btn btn-secondary"
@@ -135,6 +150,7 @@ export default function SharedBulkNotePage() {
           Download as .md
         </button>
       </div>
+      {!allowChat && <p className="shared-readonly-note" role="note">This share is read-only. The owner has not enabled chat for this link.</p>}
 
       <div className="card">
         <div className="shared-header">

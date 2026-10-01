@@ -32,8 +32,22 @@ function SharedBulkChatContent() {
           : 'Hi! Ask anything about these shared notes. I can use all notes as context.',
       },
     ]);
-    setLoading(false);
-  }, [noteId]);
+    const checkShare = async () => {
+      try {
+        const response = await fetch(`/api/shared-bulk/${token}`);
+        if (!response.ok) {
+          setError('Shared set not found or unavailable.');
+        } else if ((await response.json()).shareAllowChat === false) {
+          setError('This share is read-only. The owner has not enabled chat for this link.');
+        }
+      } catch {
+        // chat API still enforces the setting
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkShare();
+  }, [noteId, token]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

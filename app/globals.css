@@ -633,3 +633,11 @@ body {
 .edit-panel { display: flex; flex-direction: column; gap: 8px; }
 .edit-textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 14px; line-height: 1.6; resize: vertical; }
 .edit-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+.shared-readonly-note {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-left: 3px solid currentColor;
+  opacity: 0.8;
+  font-size: 0.95rem;
+}

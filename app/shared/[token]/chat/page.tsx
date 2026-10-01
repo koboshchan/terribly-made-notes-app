@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface SharedNote {
+  shareAllowChat?: boolean;
   title: string;
   content: string;
 }
@@ -111,6 +112,19 @@ export default function SharedNoteChatPage() {
 
   if (!note) {
     return null;
+  }
+
+  if (note.shareAllowChat === false) {
+    return (
+      <div className="container">
+        <div className="card">
+          <p className="shared-error-text">This share is read-only. The owner has not enabled chat for this link.</p>
+          <button onClick={() => router.push(`/shared/${params.token}`)} className="btn btn-secondary">
+            Back to Shared Note
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
