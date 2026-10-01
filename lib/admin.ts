@@ -1,53 +1,20 @@
 import { getCollection } from './db';
 
+// Owner identity comes from deployment configuration, never registration order.
+// Existing database roles must be explicitly re-approved before this rollout.
 export async function isUserAdmin(userId: string): Promise<boolean> {
+  const ownerId = process.env.ADMIN_USER_ID?.trim();
+  if (!ownerId || ownerId !== userId) return false;
   try {
-    const usersCollection = await getCollection('users');
-    
-    // Check if this is the first user ever registered
-    const userCount = await usersCollection.countDocuments();
-    if (userCount === 0) {
-      // If no users exist, register this user as the first admin
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: true,
-        registeredAt: new Date(),
-      });
-      return true;
-    }
-    
-    // Check if user is already marked as admin
-    const user = await usersCollection.findOne({ userId });
-    if (user) {
-      return user.isAdmin === true;
-    }
-    
-    // Check if this is the first user registered
-    const adminUser = await usersCollection.findOne({ isAdmin: true });
-    if (!adminUser) {
-      // No admin exists, make this user admin
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: true,
-        registeredAt: new Date(),
-      });
-      return true;
-    } else if (adminUser.userId === userId) {
-      return true;
-    }
-    
-    // Register user as non-admin
-    if (!user) {
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: false,
-        registeredAt: new Date(),
-      });
-    }
-    
-    return false;
+    const users = await getCollection('users');
+    await users.createIndex({ userId: 1 }, { unique: true });
+    await users.updateOne({ userId }, {
+      $set: { isAdmin: true },
+      $setOnInsert: { registeredAt: new Date() },
+    }, { upsert: true });
+    return true;
   } catch (error) {
-    console.error('Error checking admin status:', error);
+    console.error('Error checking configured owner:', error);
     return false;
   }
 }
