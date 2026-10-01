@@ -188,15 +188,18 @@ class ProcessingQueue {
         this.cachedPipelineSettings = {
           audioNormalization: {
             parallel: globalSettings.settings.pipeline.audioNormalization?.parallel ?? defaultPipelineSettings.audioNormalization.parallel,
+            concurrency: globalSettings.settings.pipeline.audioNormalization?.concurrency,
           },
           transcription: {
             parallel: globalSettings.settings.pipeline.transcription?.parallel ?? defaultPipelineSettings.transcription.parallel,
           },
           summarization: {
             parallel: globalSettings.settings.pipeline.summarization?.parallel ?? defaultPipelineSettings.summarization.parallel,
+            concurrency: globalSettings.settings.pipeline.summarization?.concurrency,
           },
           generation: {
             parallel: globalSettings.settings.pipeline.generation?.parallel ?? defaultPipelineSettings.generation.parallel,
+            concurrency: globalSettings.settings.pipeline.generation?.concurrency,
           },
         };
       }
