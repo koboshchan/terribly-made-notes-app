@@ -454,9 +454,10 @@ class ProcessingQueue {
 
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    const preferences = note?.processingPreferences || settings.studyPreferences || {};
     const [cardsResult, quizResult] = await Promise.allSettled([
-      note?.studyOutcomes?.flashcards === 'completed' ? Promise.resolve(note.flashcards) : generateFlashcards(item.summary.content, settings.llm),
-      note?.studyOutcomes?.quiz === 'completed' ? Promise.resolve(note.quizQuestions) : generateQuiz(item.summary.content, settings.llm),
+      preferences.flashcards === false ? Promise.resolve([]) : note?.studyOutcomes?.flashcards === 'completed' ? Promise.resolve(note.flashcards) : generateFlashcards(item.summary.content, settings.llm),
+      preferences.quiz === false ? Promise.resolve([]) : note?.studyOutcomes?.quiz === 'completed' ? Promise.resolve(note.quizQuestions) : generateQuiz(item.summary.content, settings.llm),
     ]);
     const flashcards = cardsResult.status === 'fulfilled' ? cardsResult.value : note?.flashcards || [];
     const quizQuestions = quizResult.status === 'fulfilled' ? quizResult.value : note?.quizQuestions || [];

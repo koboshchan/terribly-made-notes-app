@@ -25,6 +25,28 @@ async function providerFetch(url: string, init: RequestInit): Promise<Response> 
 
 const execAsync = promisify(execFile);
 
+// Select bounded relevant source sections, preserving labels for citations.
+export function retrieveRelevantContext(sources: { id: string; content: string }[], query: string, maxChars = Number(process.env.LLM_CONTEXT_CHARS) || 48000): string {
+  const terms = new Set(query.toLowerCase().match(/\w{3,}/g) || []);
+  const sections = sources.flatMap(source => source.content.split(/\n(?=#{1,6} )|\n\n/).flatMap(section => {
+    const pieces = section.match(/[\s\S]{1,4000}/g) || [];
+    return pieces.map(content => ({ content: `[Source ${source.id}]\n${content}`, score: [...terms].filter(term => content.toLowerCase().includes(term)).length }));
+  }));
+  sections.sort((a, b) => b.score - a.score);
+  let result = '';
+  for (const section of sections) {
+    if (result.length + section.content.length + 2 > maxChars) continue;
+    result += section.content + '\n\n';
+  }
+  return result;
+}
+
+function boundedInput(content: string): string {
+  const max = Number(process.env.LLM_CONTEXT_CHARS) || 48000;
+  if (content.length > max) throw new Error(`Input exceeds configured LLM context budget (${max} characters); split recording or increase budget`);
+  return content;
+}
+
 export interface ProcessingProgress {
   queueProgress: number;
   processProgress: number;
@@ -254,7 +276,7 @@ Required JSON structure:
 }
 
 Transcribed text:
-${text}
+${boundedInput(text)}
 
 Remember: Return ONLY the JSON object, nothing else.`;
 
@@ -273,7 +295,7 @@ Remember: Return ONLY the JSON object, nothing else.`;
           },
         ],
         temperature: 0.7,
-        max_tokens: 50000,
+        max_tokens: Number(process.env.LLM_SUMMARY_MAX_TOKENS) || 6000,
       }),
     });
 
@@ -363,7 +385,7 @@ Return ONLY a valid JSON array (no markdown code blocks, no explanations):
 ]
 
 Note content:
-${content.toString()}
+${boundedInput(content.toString())}
 
 Generate flashcards that test understanding of key concepts, definitions, and important facts.`;
 
@@ -428,7 +450,7 @@ Return ONLY a valid JSON object with a 'questions' array (no markdown code block
 }
 
 Note content:
-${content.toString()}
+${boundedInput(content.toString())}
 
 Generate questions that test understanding. Ensure wrong answers are plausible but incorrect.`;
 
