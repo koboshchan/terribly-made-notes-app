@@ -1,6 +1,6 @@
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { saveFile, deleteFile, readFile, fileExists } from './storage';
 import { Agent, setGlobalDispatcher } from 'undici';
@@ -15,7 +15,7 @@ try {
   console.warn('Failed to configure global undici dispatcher:', e);
 }
 
-const execAsync = promisify(exec);
+const execAsync = promisify(execFile);
 
 export interface ProcessingProgress {
   queueProgress: number;
@@ -37,8 +37,7 @@ export interface AudioMetadata {
 
 export async function extractAudioMetadata(filePath: string): Promise<AudioMetadata> {
   try {
-    const command = `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`;
-    const { stdout } = await execAsync(command);
+    const { stdout } = await execAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
     const probeData = JSON.parse(stdout);
 
     const metadata: AudioMetadata = {};
