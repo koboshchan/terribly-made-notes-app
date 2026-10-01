@@ -7,6 +7,7 @@ import { getCollection } from './db';
 import { getNoteDir, saveFile, deleteDir } from './storage';
 import { processingQueue } from './queue';
 import { boundedBody, RequestError } from './request-limits';
+import { randomUUID, createHash } from 'crypto';
 import { reserveUsage } from './usage';
 
 const probe = promisify(execFile);
@@ -54,6 +55,26 @@ export async function parseUpload(request: NextRequest, shortcut = false) {
 }
 
 export async function acceptUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null) {
+  // Serialize quota admission and insertion across replicas for the same user.
+  // Byte/count reservations themselves already use atomic Mongo updates.
+  const locks = await getCollection('upload_admission');
+  await locks.createIndex({ key: 1 }, { unique: true });
+  const key = createHash('sha256').update(userId).digest('hex');
+  const owner = randomUUID();
+  try {
+    await locks.updateOne({ key }, { $setOnInsert: { owner: null, leaseUntil: new Date(0) } }, { upsert: true });
+  } catch (error: any) { if (error?.code !== 11000) throw error; }
+  const claim = await locks.updateOne({ key, leaseUntil: { $lte: new Date() } }, { $set: { owner, leaseUntil: new Date(Date.now() + 90000) } });
+  if (!claim.modifiedCount) throw new RequestError('Another upload is being admitted. Retry shortly.', 409);
+  const heartbeat = setInterval(() => { void locks.updateOne({ key, owner }, { $set: { leaseUntil: new Date(Date.now() + 90000) } }).catch(console.error); }, 15000);
+  try { return await admitUpload(userId, upload, source, idempotencyKey); }
+  finally {
+    clearInterval(heartbeat);
+    await locks.updateOne({ key, owner }, { $set: { owner: null, leaseUntil: new Date(0) } });
+  }
+}
+
+async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null) {
   const notes = await getCollection('notes');
   if (idempotencyKey && !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey)) throw new RequestError('Invalid idempotency key');
   if (idempotencyKey) {
