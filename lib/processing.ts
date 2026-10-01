@@ -1,15 +1,17 @@
-import ffmpeg from 'fluent-ffmpeg';
+import { allowedProviderUrl } from './provider-url';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { saveFile, deleteFile, readFile, fileExists } from './storage';
 // Deadlines include reading the provider response body, not only headers.
 async function providerFetch(url: string, init: RequestInit): Promise<Response> {
+  const destination = url.replace(/\/(chat\/completions|audio\/transcriptions)$/, '');
+  if (!allowedProviderUrl(destination)) throw new Error('Provider endpoint is not approved in deployment configuration');
   for (let attempt = 0; ; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Number(process.env.PROVIDER_TIMEOUT_MS) || 300000);
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
+      const response = await fetch(url, { ...init, redirect: 'error', signal: controller.signal });
       const body = await response.text();
       if ((response.status === 429 || response.status >= 500) && attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));

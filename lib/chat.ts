@@ -1,4 +1,5 @@
 import { RequestError } from './request-limits';
+import { allowedProviderUrl } from './provider-url';
 import { reserveUsage } from './usage';
 
 export function validateChat(body: any) {
@@ -19,11 +20,13 @@ export async function publicChatUsage(request: Request, token: string, ownerId: 
 }
 
 export async function chatCompletion(settings: any, messages: { role: string; content: string }[]): Promise<string> {
+  const baseUrl = allowedProviderUrl(settings.baseUrl);
+  if (!baseUrl) throw new Error('Provider endpoint is not approved in deployment configuration');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
   try {
     // Chat deliberately does not retry uncertain failures and potentially charge twice.
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', redirect: 'error', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: settings.chatModel, messages, temperature: 0.7, max_tokens: 2000 }) });
+    const response = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', redirect: 'error', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: settings.chatModel, messages, temperature: 0.7, max_tokens: 2000 }) });
     if (!response.ok) throw new Error(`Chat provider returned ${response.status}`);
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
