@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import path from 'path';
 
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -20,7 +21,13 @@ export function ensureDir(dirPath: string) {
 export function saveFile(filePath: string, data: Buffer | string) {
   const dir = path.dirname(filePath);
   ensureDir(dir);
-  fs.writeFileSync(filePath, data);
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, data, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, filePath);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 export function readFile(filePath: string): Buffer {
