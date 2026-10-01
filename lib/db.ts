@@ -27,6 +27,9 @@ export async function connectToDatabase() {
   }
   return connection;
 }
+export async function getCollectionNames(): Promise<string[]> {
+  return (await connectToDatabase()).db.listCollections({}, { nameOnly: true }).map(entry => entry.name).toArray();
+}
 export async function getCollection(name: string) {
   return (await connectToDatabase()).db.collection(name);
 }

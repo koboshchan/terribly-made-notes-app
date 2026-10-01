@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
-  destroy: vi.fn(), cancel: vi.fn(), getCollection: vi.fn(), deleteDir: vi.fn(),
+  destroy: vi.fn(), cancel: vi.fn(), getCollectionNames: vi.fn(), getCollection: vi.fn(), deleteDir: vi.fn(),
   auth: vi.fn(), deleteUser: vi.fn(), verifyWebhook: vi.fn(),
 }));
 vi.mock('../lib/file-keys', () => ({ destroyUserKey: mocks.destroy }));
 vi.mock('../lib/queue', () => ({ processingQueue: { cancelUser: mocks.cancel } }));
-vi.mock('../lib/db', () => ({ getCollection: mocks.getCollection }));
+vi.mock('../lib/db', () => ({ getCollection: mocks.getCollection, getCollectionNames: mocks.getCollectionNames }));
 vi.mock('../lib/storage', () => ({ deleteDir: mocks.deleteDir, getUserDataDir: (id: string) => `/data/${id}` }));
 vi.mock('@clerk/nextjs/server', () => ({ auth: mocks.auth, clerkClient: async () => ({ users: { deleteUser: mocks.deleteUser } }) }));
 vi.mock('@clerk/nextjs/webhooks', () => ({ verifyWebhook: mocks.verifyWebhook }));
@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks(); vi.unstubAllEnvs(); removed.clear();
   vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://notes.example');
   vi.stubEnv('DATA_DIR', '/data');
+  mocks.getCollectionNames.mockResolvedValue(['notes', 'future_materials', 'file_encryption_keys', 'file_encryption_nonces', 'processing_jobs']);
   mocks.destroy.mockResolvedValue(undefined); mocks.cancel.mockResolvedValue(undefined);
   mocks.deleteDir.mockReturnValue(undefined); mocks.auth.mockResolvedValue({ userId: 'user_test' });
   mocks.deleteUser.mockResolvedValue({});
@@ -41,10 +42,31 @@ describe('account deletion key ordering and cleanup', () => {
     expect(await handleDeletedAccount('user_test')).toEqual({ complete: true, pending: [] });
     expect(mocks.destroy.mock.invocationCallOrder[0]).toBeLessThan(mocks.cancel.mock.invocationCallOrder[0]);
     for (const name of ['notes', 'user_classes', 'shared_note_sets', 'shortcut_tokens', 'user_settings', 'usage_limits', 'processing_jobs']) {
-      expect(removed.get(name)).toHaveBeenCalledWith({ userId: 'user_test' });
+      expect(removed.get(name)).toHaveBeenCalledWith(name === 'processing_jobs' ? { userId: 'user_test' } : { $or: [{ userId: 'user_test' }, { ownerId: 'user_test' }, { accountId: 'user_test' }, { clerkUserId: 'user_test' }] });
     }
     expect(removed.has('file_encryption_keys')).toBe(false);
     expect(mocks.deleteDir).toHaveBeenCalledWith('/data/user_test');
+  });
+  it('hard-deletes discovered content collections idempotently without touching other accounts', async () => {
+    const rows = [{ ownerId: 'user_test', text: 'private' }, { userId: 'other', text: 'keep' }];
+    const erase = vi.fn(async (query: { $or: Record<string, string>[] }) => {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (query.$or.some(filter => Object.entries(filter).every(([key, value]) => (rows[i] as Record<string, unknown>)[key] === value))) rows.splice(i, 1);
+      }
+    });
+    removed.set('future_materials', erase);
+    expect((await handleDeletedAccount('user_test')).complete).toBe(true);
+    expect((await handleDeletedAccount('user_test')).complete).toBe(true);
+    expect(rows).toEqual([{ userId: 'other', text: 'keep' }]);
+    expect(erase).toHaveBeenCalledTimes(2);
+    expect(removed.has('file_encryption_keys')).toBe(false);
+    expect(removed.has('file_encryption_nonces')).toBe(false);
+    for (const name of ['transcripts', 'summaries', 'study_materials', 'chat_history', 'settings']) expect(removed.get(name)).toHaveBeenCalledTimes(2);
+  });
+  it('retries collection discovery failures rather than acknowledging incomplete erasure', async () => {
+    mocks.getCollectionNames.mockRejectedValueOnce(new Error('unavailable'));
+    expect((await handleDeletedAccount('user_test')).pending).toContain('collection discovery');
+    expect((await handleDeletedAccount('user_test')).complete).toBe(true);
   });
   it('fails before cancellation and cleanup if the tombstone cannot persist', async () => {
     mocks.destroy.mockRejectedValueOnce(new Error('database unavailable'));

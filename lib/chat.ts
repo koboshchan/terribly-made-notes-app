@@ -17,8 +17,8 @@ export async function publicChatUsage(request: Request, token: string, ownerId: 
   const header = process.env.TRUSTED_CLIENT_IP_HEADER;
   const ip = header ? (request.headers.get(header)?.split(',')[0].trim() || 'unknown').slice(0, 128) : 'unknown';
   await reserveUsage(`public-chat-ip:${ip}`, runtime.chatClientPerMinute, 60000);
-  await reserveUsage(`public-chat-token:${token}`, runtime.chatTokenPerMinute, 60000);
-  await reserveUsage(`public-chat-owner:${ownerId}`, runtime.chatOwnerPerDay, 86400000);
+  await reserveUsage(`public-chat-token:${token}`, runtime.chatTokenPerMinute, 60000, 1, ownerId);
+  await reserveUsage(`public-chat-owner:${ownerId}`, runtime.chatOwnerPerDay, 86400000, 1, ownerId);
 }
 
 export async function chatCompletion(settings: any, messages: { role: string; content: string }[], runtime?: RuntimeSettings): Promise<string> {
