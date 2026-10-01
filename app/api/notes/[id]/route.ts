@@ -129,7 +129,7 @@ export async function PATCH(
       { _id: new ObjectId(id), userId },
       { $set: updates }
     );
-    if (updates.content !== undefined) saveFile(path.join(getNoteDir(userId, id), 'output.md'), updates.content);
+    if (updates.content !== undefined) await saveFile(path.join(getNoteDir(userId, id), 'output.md'), updates.content);
 
     if (result.matchedCount === 0) {
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });

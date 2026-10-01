@@ -1,13 +1,14 @@
 import { execFile } from 'child_process';
+import { mediaEnvironment } from './media-environment';
 import { promisify } from 'util';
 import { ObjectId } from 'mongodb';
 import path from 'path';
 import { NextRequest } from 'next/server';
 import { getCollection } from './db';
-import { getNoteDir, deleteDir } from './storage';
+import { getNoteDir, deleteDir, ensureUserKey, assertUserKeyActive, encryptFile } from './storage';
 import busboy from 'busboy';
 import { createWriteStream } from 'fs';
-import { mkdtemp, rm, mkdir, rename, copyFile, unlink } from 'fs/promises';
+import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -102,6 +103,7 @@ export async function acceptUpload(userId: string, upload: Awaited<ReturnType<ty
 }
 
 async function acceptUploadLocked(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null, runtime?: RuntimeSettings) {
+  await ensureUserKey(userId);
   runtime ??= await getRuntimeSettings();
   // Serialize concurrent-processing admission across replicas for the same user.
   const locks = await getCollection('upload_admission');
@@ -135,19 +137,13 @@ async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof par
   // Never interpolate a client filename into a path or subprocess.
   const originalPath = path.join(noteDir, 'original.audio');
   try {
-    await mkdir(noteDir, { recursive: true });
-    try { await rename(upload.tempPath, originalPath); }
-    catch (error: any) {
-      if (error?.code !== 'EXDEV') throw error;
-      // Cross-device copy stays disk-to-disk, without buffering file contents.
-      await copyFile(upload.tempPath, originalPath);
-      await unlink(upload.tempPath);
-    }
-    const { stdout } = await probe('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', originalPath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 1024 * 1024 });
+    const { stdout } = await probe('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', upload.tempPath], { env: mediaEnvironment(), timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 1024 * 1024 });
     const info = JSON.parse(stdout);
     const stream = info.streams?.find((s: any) => s.codec_type === 'audio');
     const duration = Number(info.format?.duration);
     if (!stream || info.streams?.some((s: any) => s.codec_type !== 'audio' && s.disposition?.attached_pic !== 1) || !Number.isFinite(duration) || duration <= 0 || duration > runtime.audioMaxSeconds) throw new RequestError('Invalid audio or duration limit exceeded');
+    await encryptFile(upload.tempPath, originalPath);
+    await assertUserKeyActive(userId);
     await notes.insertOne({ _id: noteId, userId, title: `Processing: ${upload.filename}`, description: 'Processing audio file...', content: '', status: 'processing', originalFileName: upload.filename, fileSize: upload.size, sha256: upload.sha256, language: upload.language, duration, bitrate: Number(info.format?.bit_rate) || undefined, sampleRate: Number(stream.sample_rate) || undefined, channels: stream.channels, format: info.format?.format_name, recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), ...(source ? { source } : {}), ...(upload.className ? { noteClass: upload.className, classificationSource: 'manual' } : {}), ...(upload.processingPreferences ? { processingPreferences: upload.processingPreferences } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
     await processingQueue.enqueue({ id: `${userId}_${noteId}`, userId, noteId: noteId.toString(), originalPath, mp3Path: path.join(noteDir, 'converted.mp3'), markdownPath: path.join(noteDir, 'output.md'), language: upload.language });
     return { noteId: noteId.toString(), filename: upload.filename };

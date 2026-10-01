@@ -4,6 +4,7 @@ import { readFile, rm, readdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
 vi.mock('../lib/queue', () => ({ processingQueue: { enqueue: vi.fn() } }));
+vi.mock('../lib/file-keys', () => ({ ensureUserKey: vi.fn(), assertUserKeyActive: vi.fn(), getUserKey: vi.fn(), reserveFileNonce: vi.fn() }));
 vi.mock('../lib/db', () => ({ getCollection: vi.fn() }));
 import { parseUpload, acceptUpload } from '../lib/upload';
 import { getCollection } from '../lib/db';

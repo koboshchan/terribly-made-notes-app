@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getCollection } from './db';
+import { assertUserKeyActive } from './storage';
 export type PipelineStage =
   | 'audioNormalization'
   | 'transcription'
@@ -75,8 +76,16 @@ class ProcessingQueue {
   private timer = setInterval(() => { void this.dispatch().catch(console.error); }, 5000).unref();
 
   private async persist(item: QueueItem): Promise<void> {
+    try { await assertUserKeyActive(item.userId); }
+    catch {
+      this.queue = this.queue.filter(q => q.userId !== item.userId);
+      await (await getCollection('processing_jobs')).updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { leaseOwner: null, leaseUntil: new Date(0), cancelled: true } });
+      return;
+    }
     const jobs = await getCollection('processing_jobs');
-    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { ...item, leaseOwner: null, leaseUntil: new Date(0) } });
+    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId, cancelled: { $ne: true } }, { $set: { ...item, leaseOwner: null, leaseUntil: new Date(0) } });
+    // Cancellation must release the lease without saving stale results.
+    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId, cancelled: true }, { $set: { leaseOwner: null, leaseUntil: new Date(0) } });
   }
 
   async getPersistedProgress(id: string) {
@@ -105,20 +114,42 @@ class ProcessingQueue {
   }
 
   async enqueue(item: { id: string; userId: string; noteId: string; originalPath: string; mp3Path: string; markdownPath: string; language?: 'english' | 'other' }): Promise<void> {
+    await assertUserKeyActive(item.userId);
     const jobs = await getCollection('processing_jobs');
     await jobs.createIndex({ id: 1 }, { unique: true });
     await jobs.createIndex({ stageStatus: 1, leaseUntil: 1, addedAt: 1 });
     await jobs.updateOne({ id: item.id }, { $setOnInsert: { ...item, status: 'queued', currentStage: 'audioNormalization', stageStatus: 'waiting', progress: 0, addedAt: Date.now(), leaseUntil: new Date(0) } }, { upsert: true });
+    try {
+      await assertUserKeyActive(item.userId);
+    } catch (error) {
+      await this.cancelUser(item.userId);
+      throw error;
+    }
     await this.dispatch();
   }
 
   async retry(id: string): Promise<boolean> {
     const jobs = await getCollection('processing_jobs');
-    const job = await jobs.findOneAndUpdate({ id, stageStatus: 'error', leaseOwner: null }, { $set: { stageStatus: 'waiting', status: 'queued', error: null }, $inc: { attempt: 1 } }, { returnDocument: 'after' });
+    const existing = await jobs.findOne({ id, cancelled: { $ne: true } });
+    if (!existing) return false;
+    await assertUserKeyActive(existing.userId);
+    const job = await jobs.findOneAndUpdate({ id, stageStatus: 'error', leaseOwner: null, cancelled: { $ne: true } }, { $set: { stageStatus: 'waiting', status: 'queued', error: null }, $inc: { attempt: 1 } }, { returnDocument: 'after' });
     if (!job) return false;
     this.queue = this.queue.filter(q => q.id !== id);
     await this.dispatch();
     return true;
+  }
+
+  async cancelUser(userId: string): Promise<void> {
+    // Key revocation happens first; active workers cannot save or finalize.
+    this.queue = this.queue.filter(item => item.userId !== userId);
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateMany({ userId }, { $set: { cancelled: true, status: 'error', stageStatus: 'error', error: 'Account deleted' } });
+    // Do not claim temp plaintext has gone away while a subprocess/provider call is active.
+    // Webhook retries cleanup after the active worker releases its lease in finally.
+    if (await jobs.findOne({ userId, leaseOwner: { $ne: null }, leaseUntil: { $gt: new Date() } })) {
+      throw new Error('Account processing cancellation pending');
+    }
   }
 
   async cancel(id: string): Promise<void> {
@@ -138,6 +169,7 @@ class ProcessingQueue {
   }
 
   private async assertActive(item: QueueItem): Promise<void> {
+    await assertUserKeyActive(item.userId);
     const jobs = await getCollection('processing_jobs');
     const job = await jobs.findOne({ id: item.id, leaseOwner: this.workerId, cancelled: { $ne: true } });
     if (!job) throw new Error('Job cancelled or lease lost');
@@ -323,6 +355,7 @@ class ProcessingQueue {
       try {
         const { ObjectId } = await import('mongodb');
         const { getCollection } = await import('./db');
+        await this.assertActive(item);
         const notesCollection = await getCollection('notes');
         await notesCollection.updateOne(
           { _id: new ObjectId(item.noteId), userId: item.userId },
@@ -391,7 +424,7 @@ class ProcessingQueue {
     await this.assertActive(item);
     item.transcription = transcription;
     const { saveFile } = await import('./storage');
-    saveFile(item.markdownPath.replace(/\.md$/, '.txt'), transcription);
+    await saveFile(item.markdownPath.replace(/\.md$/, '.txt'), transcription);
     item.progress = 70;
     item.currentStage = 'summarization';
     item.stageStatus = 'waiting';
@@ -411,7 +444,7 @@ class ProcessingQueue {
       const transcriptPath = item.markdownPath.replace(/\.md$/, '.txt');
       const { readFile, fileExists } = await import('./storage');
       if (fileExists(transcriptPath)) {
-        item.transcription = readFile(transcriptPath).toString('utf-8');
+        item.transcription = (await readFile(transcriptPath)).toString('utf-8');
       } else {
         throw new Error('Transcription missing for summarization step');
       }
@@ -445,7 +478,7 @@ class ProcessingQueue {
     if (!item.summary?.content) {
       const { readFile, fileExists } = await import('./storage');
       if (fileExists(item.markdownPath)) {
-        const content = readFile(item.markdownPath).toString('utf-8');
+        const content = (await readFile(item.markdownPath)).toString('utf-8');
         item.summary = {
           title: 'Note',
           description: '',
@@ -458,6 +491,8 @@ class ProcessingQueue {
 
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    if (!note) throw new Error('Note was deleted');
+    await this.assertActive(item);
     const preferences = note?.processingPreferences || settings.studyPreferences || {};
     const [cardsResult, quizResult] = await Promise.allSettled([
       preferences.flashcards === false ? Promise.resolve([]) : note?.studyOutcomes?.flashcards === 'completed' ? Promise.resolve(note.flashcards) : generateFlashcards(item.summary.content, settings.llm),
@@ -485,6 +520,7 @@ class ProcessingQueue {
       updateData.noteClass = item.summary.noteClass;
     }
 
+    await this.assertActive(item);
     await notesCollection.updateOne(
       { _id: new ObjectId(item.noteId), userId: item.userId },
       { $set: updateData }
@@ -600,3 +636,7 @@ class ProcessingQueue {
 }
 
 export const processingQueue = new ProcessingQueue();
+
+export async function cancelUser(userId: string): Promise<void> {
+  await processingQueue.cancelUser(userId);
+}

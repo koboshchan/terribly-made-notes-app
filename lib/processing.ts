@@ -1,10 +1,13 @@
 import { allowedProviderUrl } from './provider-url';
+import { mediaEnvironment } from './media-environment';
 import { getRuntimeSettings, runtimeDefaults, capabilityDefaults, type RuntimeSettings } from './runtime-settings';
 import { openAsBlob } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { saveFile, deleteFile, readFile, fileExists } from './storage';
+import { saveFile, readFile, fileExists, encryptFile, withDecryptedFile } from './storage';
+import { mkdtemp, rm, stat, chmod } from 'fs/promises';
+import { tmpdir } from 'os';
 // Deadlines include reading the provider response body, not only headers.
 async function providerFetch(url: string, init: RequestInit, runtime: RuntimeSettings): Promise<Response> {
   const destination = url.replace(/\/(chat\/completions|audio\/transcriptions)$/, '');
@@ -70,9 +73,13 @@ export interface AudioMetadata {
 }
 
 export async function extractAudioMetadata(filePath: string, runtime?: RuntimeSettings): Promise<AudioMetadata> {
-  runtime ??= await getRuntimeSettings();
+  const settings = runtime ?? await getRuntimeSettings();
+  return withDecryptedFile(filePath, plaintext => extractPlainAudioMetadata(plaintext, settings));
+}
+
+async function extractPlainAudioMetadata(filePath: string, runtime: RuntimeSettings): Promise<AudioMetadata> {
   try {
-    const { stdout } = await execAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout } = await execAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { env: mediaEnvironment(), timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
     const probeData = JSON.parse(stdout);
 
     const metadata: AudioMetadata = {};
@@ -148,7 +155,15 @@ export async function convertAudioToMp3(
 ): Promise<void> {
   const runtime = await getRuntimeSettings();
   onProgress?.(0);
-  await execAsync('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', outputPath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
+  await withDecryptedFile(inputPath, async plaintext => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'notes-normalize-'));
+    const temporaryOutput = path.join(tempDir, 'converted.mp3');
+    try {
+      await execAsync('ffmpeg', ['-y', '-i', plaintext, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', temporaryOutput], { env: mediaEnvironment(), timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
+      await chmod(temporaryOutput, 0o600);
+      await encryptFile(temporaryOutput, outputPath);
+    } finally { await rm(tempDir, { recursive: true, force: true }); }
+  });
   onProgress?.(100);
 }
 
@@ -157,6 +172,11 @@ type SttSettings = Parameters<typeof transcribeSingleAudio>[1] & {
 };
 
 export async function transcribeAudio(audioPath: string, settings: SttSettings, assertActive: () => Promise<void> = async () => {}): Promise<string> {
+  await assertActive();
+  return withDecryptedFile(audioPath, plaintext => transcribePlainAudio(plaintext, audioPath, settings, assertActive));
+}
+
+async function transcribePlainAudio(audioPath: string, persistentPath: string, settings: SttSettings, assertActive: () => Promise<void>): Promise<string> {
   const runtime = await getRuntimeSettings();
   const configured = settings.capabilities || {};
   if (configured.chunkingEnabled !== true) {
@@ -172,7 +192,7 @@ export async function transcribeAudio(audioPath: string, settings: SttSettings, 
   const profile = { ...capabilityDefaults(), ...configured };
   const maxBytes = profile.maxBytes ?? Number((capabilityDefaults() as Record<string, unknown>).maxBytes);
   const format = profile.format;
-  const duration = (await extractAudioMetadata(audioPath, runtime)).duration;
+  const duration = (await extractPlainAudioMetadata(audioPath, runtime)).duration;
   if (!duration || !Number.isFinite(duration)) throw new Error('Cannot determine audio duration');
   const seconds = Math.min(profile.chunkSeconds || 300, Math.floor(maxBytes / (format === 'wav' ? (profile.sampleRate || 16000) * (profile.channels || 1) * 2 : 16000)) - 1);
   const overlap = Math.min(profile.overlapSeconds ?? 2, seconds / 4);
@@ -180,18 +200,19 @@ export async function transcribeAudio(audioPath: string, settings: SttSettings, 
   const parts: string[] = [];
   for (let start = 0, index = 0; start < duration; start += seconds - overlap, index++) {
     await assertActive();
-    const chunk = `${audioPath}.chunk-${index}.${format}`;
-    const checkpoint = `${chunk}.txt`;
-    if (fileExists(checkpoint)) { parts.push(readFile(checkpoint).toString('utf8')); continue; }
+    const checkpoint = `${persistentPath}.chunk-${index}.${format}.txt`;
+    if (fileExists(checkpoint)) { parts.push((await readFile(checkpoint)).toString('utf8')); continue; }
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'notes-stt-chunk-'));
+    const chunk = path.join(tempDir, `chunk.${format}`);
     try {
-      await execAsync('ffmpeg', ['-y', '-ss', String(start), '-i', audioPath, '-t', String(seconds), '-vn', '-ac', String(profile.channels || 1), '-ar', String(profile.sampleRate || 16000), ...(format === 'mp3' ? ['-b:a', '128k'] : ['-c:a', 'pcm_s16le']), chunk], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
-      const fs = await import('fs');
-      if (fs.statSync(chunk).size > maxBytes) throw new Error('STT chunk exceeds configured provider size limit');
+      await execAsync('ffmpeg', ['-y', '-ss', String(start), '-i', audioPath, '-t', String(seconds), '-vn', '-ac', String(profile.channels || 1), '-ar', String(profile.sampleRate || 16000), ...(format === 'mp3' ? ['-b:a', '128k'] : ['-c:a', 'pcm_s16le']), chunk], { env: mediaEnvironment(), timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
+      await chmod(chunk, 0o600);
+      if ((await stat(chunk)).size > maxBytes) throw new Error('STT chunk exceeds configured provider size limit');
       const text = await transcribeSingleAudio(chunk, settings, runtime);
       await assertActive();
-      saveFile(checkpoint, text);
+      await saveFile(checkpoint, text);
       parts.push(text);
-    } finally { deleteFile(chunk); }
+    } finally { await rm(tempDir, { recursive: true, force: true }); }
   }
   // Remove exact word overlap without inventing or summarizing speech.
   let result = '';
@@ -367,7 +388,7 @@ Remember: Return ONLY the JSON object, nothing else.`;
 }
 
 export async function saveMarkdownNote(filePath: string, content: string): Promise<void> {
-  saveFile(filePath, content);
+  await saveFile(filePath, content);
 }
 
 export interface Flashcard {

@@ -3,7 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import path from 'path';
 import { getCollection } from '@/lib/db';
-import { getNoteDir, getFileExtension, fileExists } from '@/lib/storage';
+import { getNoteDir, getFileExtension, fileExists, assertUserKeyActive } from '@/lib/storage';
 import { processingQueue } from '@/lib/queue';
 const extensions = new Set(['.audio', '.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.mp4']);
 
@@ -19,6 +19,7 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    await assertUserKeyActive(userId);
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({
       _id: new ObjectId(id),

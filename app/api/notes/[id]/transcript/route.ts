@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest, context: Context) {
   try {
     const { id, note, transcriptPath } = await transcriptAccess(context);
     if (!fileExists(transcriptPath)) throw new RequestError('Original transcript is unavailable. The AI summary is not a transcript.', 404);
-    const transcript = readFile(transcriptPath).toString('utf8');
+    const transcript = (await readFile(transcriptPath)).toString('utf8');
     return new NextResponse(transcript, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="transcript-${id}.txt"`, 'Cache-Control': 'private, no-store', 'Last-Modified': new Date(note.transcriptUpdatedAt || note.updatedAt || note.createdAt).toUTCString() } });
   } catch (error) { return failure(error); }
 }
@@ -39,7 +39,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     if (note.status === 'processing') throw new RequestError('Wait until processing finishes before correcting the transcript', 409);
     const { transcript } = await boundedJson(request, 2 * 1024 * 1024);
     if (typeof transcript !== 'string' || !transcript.trim() || transcript.length > 1024 * 1024) throw new RequestError('Transcript must be 1 to 1048576 characters');
-    saveFile(transcriptPath, transcript);
+    await saveFile(transcriptPath, transcript);
     await notes.updateOne(filter, { $set: { transcriptUpdatedAt: new Date(), updatedAt: new Date() } });
     return NextResponse.json({ success: true });
   } catch (error) { return failure(error); }

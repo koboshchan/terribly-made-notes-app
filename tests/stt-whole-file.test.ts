@@ -3,6 +3,7 @@ vi.mock('../lib/runtime-settings', async importOriginal => {
   const actual = await importOriginal<typeof import('../lib/runtime-settings')>();
   return { ...actual, getRuntimeSettings: vi.fn(async () => actual.runtimeDefaults()) };
 });
+vi.mock('../lib/storage', () => ({ withDecryptedFile: async (file: string, callback: (plain: string) => Promise<unknown>) => callback(file), saveFile: vi.fn(), readFile: vi.fn(), fileExists: vi.fn(), encryptFile: vi.fn() }));
 vi.mock('../lib/provider-url', () => ({ allowedProviderUrl: () => true }));
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
