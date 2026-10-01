@@ -305,7 +305,7 @@ Remember: Return ONLY the JSON object, nothing else.`;
       const result = JSON.parse(jsonContent);
 
       // Validate the response structure
-      if (!result.title || !result.description || !result.content) {
+      if (![result.title, result.description, result.content].every(v => typeof v === 'string' && v.trim())) {
         throw new Error('Invalid response structure from LLM');
       }
 
@@ -393,19 +393,14 @@ Generate flashcards that test understanding of key concepts, definitions, and im
       throw new Error('No content received');
     }
 
-    // Try to extract JSON array
-    const jsonMatch = responseContent.match(/\[[\s\S]*?\]/);
-    if (jsonMatch) {
-      responseContent = jsonMatch[0];
-    }
-
     responseContent = responseContent.replace(/```(?:json)?\n?|\n?```$/g, '').trim();
 
     const flashcards = JSON.parse(responseContent);
-    return Array.isArray(flashcards) ? flashcards : [];
+    if (!Array.isArray(flashcards) || !flashcards.length || flashcards.length > 100 || !flashcards.every(c => c && typeof c.front === 'string' && c.front.trim() && typeof c.back === 'string' && c.back.trim())) throw new Error('Invalid flashcard schema');
+    return flashcards;
   } catch (error) {
     console.error('Failed to generate flashcards:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -468,7 +463,8 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
     responseContent = responseContent.replace(/```(?:json)?\n?|\n?```$/g, '').trim();
 
     const parsed = JSON.parse(responseContent);
-    const questions = parsed.questions || [];
+    const questions = parsed.questions;
+    if (!Array.isArray(questions) || !questions.length || questions.length > 100 || !questions.every(q => q && typeof q.question === 'string' && q.question.trim() && typeof q.correctAnswer === 'string' && q.correctAnswer.trim() && typeof q.explanation === 'string' && Array.isArray(q.wrongAnswers) && q.wrongAnswers.length === 3 && q.wrongAnswers.every((a: unknown) => typeof a === 'string' && a.trim()))) throw new Error('Invalid quiz schema');
     
     return questions.map((q: ParsedQuizQuestion) => ({
       question: q.question || '',
@@ -479,6 +475,6 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
     }));
   } catch (error) {
     console.error('Failed to generate quiz:', error);
-    return [];
+    throw error;
   }
 }

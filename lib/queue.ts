@@ -452,22 +452,26 @@ class ProcessingQueue {
       }
     }
 
-    // Flashcards & Quiz generated concurrently
-    const [flashcards, quizQuestions] = await Promise.all([
-      generateFlashcards(item.summary.content, settings.llm),
-      generateQuiz(item.summary.content, settings.llm),
+    const notesCollection = await getCollection('notes');
+    const note = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    const [cardsResult, quizResult] = await Promise.allSettled([
+      note?.studyOutcomes?.flashcards === 'completed' ? Promise.resolve(note.flashcards) : generateFlashcards(item.summary.content, settings.llm),
+      note?.studyOutcomes?.quiz === 'completed' ? Promise.resolve(note.quizQuestions) : generateQuiz(item.summary.content, settings.llm),
     ]);
-
+    const flashcards = cardsResult.status === 'fulfilled' ? cardsResult.value : note?.flashcards || [];
+    const quizQuestions = quizResult.status === 'fulfilled' ? quizResult.value : note?.quizQuestions || [];
+    const failed = cardsResult.status === 'rejected' || quizResult.status === 'rejected';
+    const studyOutcomes = { summary: 'completed', flashcards: cardsResult.status === 'fulfilled' ? 'completed' : 'error', quiz: quizResult.status === 'fulfilled' ? 'completed' : 'error' };
     await this.assertActive(item);
     item.progress = 98;
-    const notesCollection = await getCollection('notes');
     const updateData: any = {
       title: item.summary.title,
       description: item.summary.description,
       content: item.summary.content,
       flashcards,
       quizQuestions,
-      status: 'completed',
+      studyOutcomes,
+      status: failed ? 'error' : 'completed',
       updatedAt: new Date(),
     };
 
@@ -480,6 +484,8 @@ class ProcessingQueue {
       { _id: new ObjectId(item.noteId), userId: item.userId },
       { $set: updateData }
     );
+
+    if (failed) throw new Error('Some study materials failed; retry resumes only missing outcomes');
 
     // Clean up original raw audio to save space
     deleteFile(item.originalPath);
