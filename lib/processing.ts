@@ -124,7 +124,48 @@ export async function convertAudioToMp3(
   onProgress?.(100);
 }
 
-export async function transcribeAudio(
+type SttSettings = Parameters<typeof transcribeSingleAudio>[1] & {
+  capabilities?: { maxBytes?: number; chunkSeconds?: number; overlapSeconds?: number; format?: 'mp3' | 'wav'; sampleRate?: number; channels?: number };
+};
+
+export async function transcribeAudio(audioPath: string, settings: SttSettings): Promise<string> {
+  const profile = settings.capabilities || {};
+  const maxBytes = profile.maxBytes || Number(process.env.STT_MAX_BYTES) || 20 * 1024 * 1024;
+  const format = profile.format || 'mp3';
+  const duration = (await extractAudioMetadata(audioPath)).duration;
+  if (!duration || !Number.isFinite(duration)) throw new Error('Cannot determine audio duration');
+  const seconds = Math.min(profile.chunkSeconds || 300, Math.floor(maxBytes / (format === 'wav' ? (profile.sampleRate || 16000) * (profile.channels || 1) * 2 : 16000)) - 1);
+  const overlap = Math.min(profile.overlapSeconds ?? 2, seconds / 4);
+  if (seconds <= 1) throw new Error('Invalid STT byte capability');
+  const parts: string[] = [];
+  for (let start = 0, index = 0; start < duration; start += seconds - overlap, index++) {
+    const chunk = `${audioPath}.chunk-${index}.${format}`;
+    const checkpoint = `${chunk}.txt`;
+    if (fileExists(checkpoint)) { parts.push(readFile(checkpoint).toString('utf8')); continue; }
+    try {
+      await execAsync('ffmpeg', ['-y', '-ss', String(start), '-i', audioPath, '-t', String(seconds), '-vn', '-ac', String(profile.channels || 1), '-ar', String(profile.sampleRate || 16000), ...(format === 'mp3' ? ['-b:a', '128k'] : ['-c:a', 'pcm_s16le']), chunk], { timeout: 600000, maxBuffer: 4 * 1024 * 1024 });
+      const fs = await import('fs');
+      if (fs.statSync(chunk).size > maxBytes) throw new Error('STT chunk exceeds configured provider size limit');
+      const text = await transcribeSingleAudio(chunk, settings);
+      saveFile(checkpoint, text);
+      parts.push(text);
+    } finally { deleteFile(chunk); }
+  }
+  // Remove exact word overlap without inventing or summarizing speech.
+  let result = '';
+  for (const part of parts) {
+    const prior = result.trim().split(/\s+/);
+    const next = part.trim().split(/\s+/);
+    let overlapWords = 0;
+    for (let size = 1; size <= Math.min(80, prior.length, next.length); size++) {
+      if (prior.slice(-size).join(' ') === next.slice(0, size).join(' ')) overlapWords = size;
+    }
+    result += (result ? ' ' : '') + next.slice(overlapWords).join(' ');
+  }
+  return result;
+}
+
+async function transcribeSingleAudio(
   audioPath: string,
   settings: {
     baseUrl: string;
@@ -138,8 +179,8 @@ export async function transcribeAudio(
     const audioBuffer = readFile(audioPath);
 
     const formData = new FormData();
-    const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: 'audio/mp3' });
-    formData.append('file', audioBlob, 'audio.mp3');
+    const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: audioPath.endsWith('.wav') ? 'audio/wav' : 'audio/mp3' });
+    formData.append('file', audioBlob, path.basename(audioPath));
     formData.append('model', settings.modelName);
     formData.append('task', settings.task);
     formData.append('temperature', settings.temperature.toString());

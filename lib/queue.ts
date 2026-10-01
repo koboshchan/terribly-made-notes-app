@@ -381,6 +381,7 @@ class ProcessingQueue {
       modelName: selectedModel.modelName,
       task: selectedModel.task,
       temperature: selectedModel.temperature,
+      capabilities: settings.stt.capabilities,
     });
 
     await this.assertActive(item);
