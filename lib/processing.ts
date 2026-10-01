@@ -3,16 +3,24 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { saveFile, deleteFile, readFile, fileExists } from './storage';
-import { Agent, setGlobalDispatcher } from 'undici';
-
-// Disable default undici headers and body timeouts (0) for long-running AI/STT requests
-try {
-  setGlobalDispatcher(new Agent({
-    headersTimeout: 0,
-    bodyTimeout: 0,
-  }));
-} catch (e) {
-  console.warn('Failed to configure global undici dispatcher:', e);
+// Deadlines include reading the provider response body, not only headers.
+async function providerFetch(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Number(process.env.PROVIDER_TIMEOUT_MS) || 300000);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      const body = await response.text();
+      if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
+        continue;
+      }
+      return new Response(body, { status: response.status, headers: response.headers });
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
+    } finally { clearTimeout(timer); }
+  }
 }
 
 const execAsync = promisify(execFile);
@@ -111,26 +119,9 @@ export async function convertAudioToMp3(
   outputPath: string,
   onProgress?: (progress: number) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .toFormat('mp3')
-      .audioCodec('libmp3lame')
-      .audioBitrate(128)
-      .audioChannels(2)
-      .audioFrequency(44100)
-      .on('progress', (progress) => {
-        if (onProgress) {
-          onProgress(progress.percent || 0);
-        }
-      })
-      .on('end', () => {
-        resolve();
-      })
-      .on('error', (err) => {
-        reject(err);
-      })
-      .save(outputPath);
-  });
+  onProgress?.(0);
+  await execAsync('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', outputPath], { timeout: (Number(process.env.MEDIA_TIMEOUT_SECONDS) || 600) * 1000, maxBuffer: 4 * 1024 * 1024 });
+  onProgress?.(100);
 }
 
 export async function transcribeAudio(
@@ -155,7 +146,7 @@ export async function transcribeAudio(
     formData.append('response_format', 'text');
 
     try {
-      const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/audio/transcriptions`, {
+      const response = await providerFetch(`${settings.baseUrl.replace(/\/+$/, '')}/audio/transcriptions`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${settings.apiKey}`,
@@ -226,13 +217,7 @@ ${text}
 
 Remember: Return ONLY the JSON object, nothing else.`;
 
-    // Set 5-minute timeout for LLM
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, 5 * 60 * 1000); // 5 minutes
-
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await providerFetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -249,10 +234,8 @@ Remember: Return ONLY the JSON object, nothing else.`;
         temperature: 0.7,
         max_tokens: 50000,
       }),
-      signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
@@ -344,7 +327,7 @@ ${content.toString()}
 Generate flashcards that test understanding of key concepts, definitions, and important facts.`;
 
   try {
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await providerFetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -414,7 +397,7 @@ ${content.toString()}
 Generate questions that test understanding. Ensure wrong answers are plausible but incorrect.`;
 
   try {
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await providerFetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
