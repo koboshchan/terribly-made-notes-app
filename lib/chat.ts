@@ -1,6 +1,7 @@
 import { RequestError } from './request-limits';
 import { allowedProviderUrl } from './provider-url';
 import { reserveUsage } from './usage';
+import { getRuntimeSettings, type RuntimeSettings } from './runtime-settings';
 
 export function validateChat(body: any) {
   if (!body || typeof body.message !== 'string' || !body.message.trim() || body.message.length > 4000) throw new RequestError('Message must be between 1 and 4000 characters');
@@ -9,24 +10,26 @@ export function validateChat(body: any) {
   return { message: body.message.trim() as string, history: history as { role: 'user' | 'assistant'; content: string }[] };
 }
 
-export async function publicChatUsage(request: Request, token: string, ownerId: string) {
+export async function publicChatUsage(request: Request, token: string, ownerId: string, runtime?: RuntimeSettings) {
+  runtime ??= await getRuntimeSettings();
   // Avoid trusting forwarded IPs from unconfigured proxies. Unknown clients share
   // one conservative bucket. Operators must configure the trusted proxy header.
   const header = process.env.TRUSTED_CLIENT_IP_HEADER;
   const ip = header ? (request.headers.get(header)?.split(',')[0].trim() || 'unknown').slice(0, 128) : 'unknown';
-  await reserveUsage(`public-chat-ip:${ip}`, 20, 60000);
-  await reserveUsage(`public-chat-token:${token}`, 10, 60000);
-  await reserveUsage(`public-chat-owner:${ownerId}`, Number(process.env.PUBLIC_CHAT_DAILY_REQUESTS) || 100, 86400000);
+  await reserveUsage(`public-chat-ip:${ip}`, runtime.chatClientPerMinute, 60000);
+  await reserveUsage(`public-chat-token:${token}`, runtime.chatTokenPerMinute, 60000);
+  await reserveUsage(`public-chat-owner:${ownerId}`, runtime.chatOwnerPerDay, 86400000);
 }
 
-export async function chatCompletion(settings: any, messages: { role: string; content: string }[]): Promise<string> {
+export async function chatCompletion(settings: any, messages: { role: string; content: string }[], runtime?: RuntimeSettings): Promise<string> {
+  runtime ??= await getRuntimeSettings();
   const baseUrl = allowedProviderUrl(settings.baseUrl);
   if (!baseUrl) throw new Error('Provider endpoint is not approved in deployment configuration');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), runtime.providerTimeoutMs);
   try {
     // Chat deliberately does not retry uncertain failures and potentially charge twice.
-    const response = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', redirect: 'error', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: settings.chatModel, messages, temperature: 0.7, max_tokens: 2000 }) });
+    const response = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', redirect: 'error', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: settings.chatModel, messages, temperature: 0.7, max_tokens: runtime.summaryMaxTokens }) });
     if (!response.ok) throw new Error(`Chat provider returned ${response.status}`);
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;

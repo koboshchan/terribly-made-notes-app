@@ -1,15 +1,17 @@
 import { allowedProviderUrl } from './provider-url';
+import { getRuntimeSettings, runtimeDefaults, capabilityDefaults, type RuntimeSettings } from './runtime-settings';
+import { openAsBlob } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { saveFile, deleteFile, readFile, fileExists } from './storage';
 // Deadlines include reading the provider response body, not only headers.
-async function providerFetch(url: string, init: RequestInit): Promise<Response> {
+async function providerFetch(url: string, init: RequestInit, runtime: RuntimeSettings): Promise<Response> {
   const destination = url.replace(/\/(chat\/completions|audio\/transcriptions)$/, '');
   if (!allowedProviderUrl(destination)) throw new Error('Provider endpoint is not approved in deployment configuration');
   for (let attempt = 0; ; attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number(process.env.PROVIDER_TIMEOUT_MS) || 300000);
+    const timer = setTimeout(() => controller.abort(), runtime.providerTimeoutMs);
     try {
       const response = await fetch(url, { ...init, redirect: 'error', signal: controller.signal });
       const body = await response.text();
@@ -28,7 +30,7 @@ async function providerFetch(url: string, init: RequestInit): Promise<Response> 
 const execAsync = promisify(execFile);
 
 // Select bounded relevant source sections, preserving labels for citations.
-export function retrieveRelevantContext(sources: { id: string; content: string }[], query: string, maxChars = Number(process.env.LLM_CONTEXT_CHARS) || 48000): string {
+export function retrieveRelevantContext(sources: { id: string; content: string }[], query: string, maxChars = runtimeDefaults().contextChars): string {
   const terms = new Set(query.toLowerCase().match(/\w{3,}/g) || []);
   const sections = sources.flatMap(source => source.content.split(/\n(?=#{1,6} )|\n\n/).flatMap(section => {
     const pieces = section.match(/[\s\S]{1,4000}/g) || [];
@@ -43,8 +45,8 @@ export function retrieveRelevantContext(sources: { id: string; content: string }
   return result;
 }
 
-function boundedInput(content: string): string {
-  const max = Number(process.env.LLM_CONTEXT_CHARS) || 48000;
+function boundedInput(content: string, runtime: RuntimeSettings): string {
+  const max = runtime.contextChars;
   if (content.length > max) throw new Error(`Input exceeds configured LLM context budget (${max} characters); split recording or increase budget`);
   return content;
 }
@@ -67,9 +69,10 @@ export interface AudioMetadata {
   album?: string;
 }
 
-export async function extractAudioMetadata(filePath: string): Promise<AudioMetadata> {
+export async function extractAudioMetadata(filePath: string, runtime?: RuntimeSettings): Promise<AudioMetadata> {
+  runtime ??= await getRuntimeSettings();
   try {
-    const { stdout } = await execAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout } = await execAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
     const probeData = JSON.parse(stdout);
 
     const metadata: AudioMetadata = {};
@@ -143,20 +146,33 @@ export async function convertAudioToMp3(
   outputPath: string,
   onProgress?: (progress: number) => void
 ): Promise<void> {
+  const runtime = await getRuntimeSettings();
   onProgress?.(0);
-  await execAsync('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', outputPath], { timeout: (Number(process.env.MEDIA_TIMEOUT_SECONDS) || 600) * 1000, maxBuffer: 4 * 1024 * 1024 });
+  await execAsync('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', outputPath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
   onProgress?.(100);
 }
 
 type SttSettings = Parameters<typeof transcribeSingleAudio>[1] & {
-  capabilities?: { maxBytes?: number; chunkSeconds?: number; overlapSeconds?: number; format?: 'mp3' | 'wav'; sampleRate?: number; channels?: number };
+  capabilities?: { chunkingEnabled?: boolean; maxBytes?: number; chunkSeconds?: number; overlapSeconds?: number; format?: 'mp3' | 'wav'; sampleRate?: number; channels?: number };
 };
 
 export async function transcribeAudio(audioPath: string, settings: SttSettings, assertActive: () => Promise<void> = async () => {}): Promise<string> {
-  const profile = settings.capabilities || {};
-  const maxBytes = profile.maxBytes || Number(process.env.STT_MAX_BYTES) || 20 * 1024 * 1024;
-  const format = profile.format || 'mp3';
-  const duration = (await extractAudioMetadata(audioPath)).duration;
+  const runtime = await getRuntimeSettings();
+  const configured = settings.capabilities || {};
+  if (configured.chunkingEnabled !== true) {
+    await assertActive();
+    try {
+      const text = await transcribeSingleAudio(audioPath, settings, runtime);
+      await assertActive();
+      return text;
+    } catch (error) {
+      throw new Error(`Whole-file STT failed; no automatic chunking fallback. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const profile = { ...capabilityDefaults(), ...configured };
+  const maxBytes = profile.maxBytes ?? Number((capabilityDefaults() as Record<string, unknown>).maxBytes);
+  const format = profile.format;
+  const duration = (await extractAudioMetadata(audioPath, runtime)).duration;
   if (!duration || !Number.isFinite(duration)) throw new Error('Cannot determine audio duration');
   const seconds = Math.min(profile.chunkSeconds || 300, Math.floor(maxBytes / (format === 'wav' ? (profile.sampleRate || 16000) * (profile.channels || 1) * 2 : 16000)) - 1);
   const overlap = Math.min(profile.overlapSeconds ?? 2, seconds / 4);
@@ -168,10 +184,10 @@ export async function transcribeAudio(audioPath: string, settings: SttSettings, 
     const checkpoint = `${chunk}.txt`;
     if (fileExists(checkpoint)) { parts.push(readFile(checkpoint).toString('utf8')); continue; }
     try {
-      await execAsync('ffmpeg', ['-y', '-ss', String(start), '-i', audioPath, '-t', String(seconds), '-vn', '-ac', String(profile.channels || 1), '-ar', String(profile.sampleRate || 16000), ...(format === 'mp3' ? ['-b:a', '128k'] : ['-c:a', 'pcm_s16le']), chunk], { timeout: 600000, maxBuffer: 4 * 1024 * 1024 });
+      await execAsync('ffmpeg', ['-y', '-ss', String(start), '-i', audioPath, '-t', String(seconds), '-vn', '-ac', String(profile.channels || 1), '-ar', String(profile.sampleRate || 16000), ...(format === 'mp3' ? ['-b:a', '128k'] : ['-c:a', 'pcm_s16le']), chunk], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024 });
       const fs = await import('fs');
       if (fs.statSync(chunk).size > maxBytes) throw new Error('STT chunk exceeds configured provider size limit');
-      const text = await transcribeSingleAudio(chunk, settings);
+      const text = await transcribeSingleAudio(chunk, settings, runtime);
       await assertActive();
       saveFile(checkpoint, text);
       parts.push(text);
@@ -199,13 +215,13 @@ async function transcribeSingleAudio(
     modelName: string;
     task: 'transcribe' | 'translate';
     temperature: number;
-  }
+  },
+  runtime: RuntimeSettings
 ): Promise<string> {
   try {
-    const audioBuffer = readFile(audioPath);
-
     const formData = new FormData();
-    const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: audioPath.endsWith('.wav') ? 'audio/wav' : 'audio/mp3' });
+    // Native disk-backed Blob keeps whole-file STT memory bounded too.
+    const audioBlob = await openAsBlob(audioPath, { type: audioPath.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg' });
     formData.append('file', audioBlob, path.basename(audioPath));
     formData.append('model', settings.modelName);
     formData.append('task', settings.task);
@@ -219,7 +235,7 @@ async function transcribeSingleAudio(
           'Authorization': `Bearer ${settings.apiKey}`,
         },
         body: formData,
-      });
+      }, runtime);
 
       if (!response.ok) {
         throw new Error(`STT API error: ${response.status} ${response.statusText}`);
@@ -251,6 +267,7 @@ export async function summarizeText(
   content: string;
   noteClass?: string;
 }> {
+  const runtime = await getRuntimeSettings();
   try {
     let classificationInstruction = '';
     let classificationField = '';
@@ -280,7 +297,7 @@ Required JSON structure:
 }
 
 Transcribed text:
-${boundedInput(text)}
+${boundedInput(text, runtime)}
 
 Remember: Return ONLY the JSON object, nothing else.`;
 
@@ -299,9 +316,9 @@ Remember: Return ONLY the JSON object, nothing else.`;
           },
         ],
         temperature: 0.7,
-        max_tokens: Number(process.env.LLM_SUMMARY_MAX_TOKENS) || 6000,
+        max_tokens: runtime.summaryMaxTokens,
       }),
-    });
+    }, runtime);
 
 
     if (!response.ok) {
@@ -342,7 +359,7 @@ Remember: Return ONLY the JSON object, nothing else.`;
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('AI summarization request timed out after 5 minutes. Please try again or use a shorter audio file.');
+      throw new Error('AI summarization exceeded the configured provider timeout. Please try again or use a shorter audio file.');
     }
     console.error('Summarization failed:', error);
     throw error;
@@ -381,6 +398,7 @@ export async function generateFlashcards(
     quizModel: string;
   }
 ): Promise<Flashcard[]> {
+  const runtime = await getRuntimeSettings();
   const prompt = `Based on the following note content, generate enough flashcards to cover all information in this note.
 
 Return ONLY a valid JSON array (no markdown code blocks, no explanations):
@@ -389,7 +407,7 @@ Return ONLY a valid JSON array (no markdown code blocks, no explanations):
 ]
 
 Note content:
-${boundedInput(content.toString())}
+${boundedInput(content.toString(), runtime)}
 
 Generate flashcards that test understanding of key concepts, definitions, and important facts.`;
 
@@ -404,9 +422,9 @@ Generate flashcards that test understanding of key concepts, definitions, and im
         model: settings.quizModel,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
-        max_tokens: 4000,
+        max_tokens: runtime.summaryMaxTokens,
       }),
-    });
+    }, runtime);
 
     if (!response.ok) {
       throw new Error(`LLM API error: ${response.status}`);
@@ -438,6 +456,7 @@ export async function generateQuiz(
     quizModel: string;
   }
 ): Promise<QuizQuestion[]> {
+  const runtime = await getRuntimeSettings();
   const prompt = `Based on the following note content, generate 5 to 10 quiz questions.
 
 Return ONLY a valid JSON object with a 'questions' array (no markdown code blocks, no explanations):
@@ -454,7 +473,7 @@ Return ONLY a valid JSON object with a 'questions' array (no markdown code block
 }
 
 Note content:
-${boundedInput(content.toString())}
+${boundedInput(content.toString(), runtime)}
 
 Generate questions that test understanding. Ensure wrong answers are plausible but incorrect.`;
 
@@ -469,10 +488,10 @@ Generate questions that test understanding. Ensure wrong answers are plausible b
         model: settings.quizModel,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
-        max_tokens: 4000,
+        max_tokens: runtime.summaryMaxTokens,
         response_format: { type: 'json_object' },
       }),
-    });
+    }, runtime);
 
     if (!response.ok) {
       throw new Error(`LLM API error: ${response.status}`);

@@ -3,18 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export interface ShareSettingsBody {
-  expiresInDays?: number;
   allowChat?: boolean;
-  rotate?: boolean;
 }
-
-const EXPIRY_OPTIONS: { label: string; value: number }[] = [
-  { label: '1 day', value: 1 },
-  { label: '7 days', value: 7 },
-  { label: '30 days', value: 30 },
-  { label: '90 days', value: 90 },
-  { label: '365 days (max)', value: 365 },
-];
 
 export function formatExpiry(expiresAt: string | null | undefined): string {
   if (!expiresAt) return 'Never expires';
@@ -36,43 +26,25 @@ async function copyText(text: string): Promise<boolean> {
 export function ShareWarning() {
   return (
     <p className="share-warning" role="note">
-      Anyone with this link can read these notes without signing in. Revoke the link to stop access.
+      Anyone with this link can read these notes without signing in. Delete the share link to stop access. Your notes are not deleted.
     </p>
   );
 }
 
-/** Expiry + AI chat permission inputs, shared by single and bulk share UIs. */
+/** AI chat permission inputs, shared by single and bulk share UIs. */
 export function ShareOptions({
   idPrefix,
-  expiresInDays,
   allowChat,
-  onExpiresChange,
   onAllowChatChange,
   disabled,
 }: {
   idPrefix: string;
-  expiresInDays: number;
   allowChat: boolean;
-  onExpiresChange: (days: number) => void;
   onAllowChatChange: (allow: boolean) => void;
   disabled?: boolean;
 }) {
   return (
     <div className="share-options">
-      <label htmlFor={`${idPrefix}-expiry`} className="share-option">
-        <span>Link expires after</span>
-        <select
-          id={`${idPrefix}-expiry`}
-          className="form-select share-select"
-          value={expiresInDays}
-          disabled={disabled}
-          onChange={(e) => onExpiresChange(Number(e.target.value))}
-        >
-          {EXPIRY_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      </label>
       <label htmlFor={`${idPrefix}-chat`} className="share-option share-checkbox">
         <input
           id={`${idPrefix}-chat`}
@@ -90,12 +62,9 @@ export function ShareOptions({
   );
 }
 
-/** Body sent to the API. Server requires expiresInDays in 1-365; always send a JSON body. */
-export function buildShareBody(expiresInDays: number, allowChat: boolean, rotate?: boolean): ShareSettingsBody {
-  const days = Number.isFinite(expiresInDays) ? Math.min(365, Math.max(1, Math.round(expiresInDays))) : 30;
-  const body: ShareSettingsBody = { expiresInDays: days, allowChat };
-  if (rotate) body.rotate = true;
-  return body;
+/** Body sent to the API. Expiry is set by the admin's global policy, never by the user. */
+export function buildShareBody(allowChat: boolean): ShareSettingsBody {
+  return { allowChat };
 }
 
 interface ShareState {
@@ -112,7 +81,6 @@ export function NoteShareManager({ noteId, canShare }: { noteId: string; canShar
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
-  const [expiresInDays, setExpiresInDays] = useState(30);
   const [allowChat, setAllowChat] = useState(false);
 
   const load = useCallback(async () => {
@@ -161,15 +129,11 @@ export function NoteShareManager({ noteId, canShare }: { noteId: string; canShar
     }
   };
 
-  const createLink = () => send('POST', buildShareBody(expiresInDays, allowChat));
-  const saveSettings = () => send('PATCH', buildShareBody(expiresInDays, allowChat), 'Share settings saved.');
-  const rotate = () => {
-    if (!confirm('Create a new link? The current link will stop working.')) return;
-    send('PATCH', buildShareBody(expiresInDays, allowChat, true), 'New link created. The old link no longer works.');
-  };
-  const revoke = () => {
-    if (!confirm('Revoke this link? Anyone using it will lose access.')) return;
-    send('DELETE', undefined, 'Link revoked.');
+  const createLink = () => send('POST', buildShareBody(allowChat));
+  const saveSettings = () => send('PATCH', buildShareBody(allowChat), 'Share settings saved.');
+  const deleteLink = () => {
+    if (!confirm('Delete this share link? Anyone using it will lose access. Your notes are not deleted.')) return;
+    send('DELETE', undefined, 'Share link deleted.');
   };
   const onAllowChatChange = (allow: boolean) => {
     if (allow && !confirm('Anyone with the link will be able to chat with AI about this note, using your account. Allow?')) return;
@@ -216,9 +180,7 @@ export function NoteShareManager({ noteId, canShare }: { noteId: string; canShar
           )}
           <ShareOptions
             idPrefix="note-share"
-            expiresInDays={expiresInDays}
             allowChat={allowChat}
-            onExpiresChange={setExpiresInDays}
             onAllowChatChange={onAllowChatChange}
             disabled={busy}
           />
@@ -226,8 +188,7 @@ export function NoteShareManager({ noteId, canShare }: { noteId: string; canShar
             {active ? (
               <>
                 <button type="button" className="btn btn-primary" onClick={saveSettings} disabled={busy}>Save settings</button>
-                <button type="button" className="btn btn-secondary" onClick={rotate} disabled={busy}>New link</button>
-                <button type="button" className="btn btn-danger" onClick={revoke} disabled={busy}>Revoke</button>
+                <button type="button" className="btn btn-danger" onClick={deleteLink} disabled={busy}>Delete share link</button>
               </>
             ) : (
               <button type="button" className="btn btn-primary" onClick={createLink} disabled={busy || !canShare}>
@@ -252,7 +213,7 @@ interface BulkShare {
   allowChat: boolean;
 }
 
-/** Owner list of bulk share links with per-link and "revoke all" controls. */
+/** Owner list of bulk share links with per-link and "delete all" controls. */
 export function BulkShareManager() {
   const [shares, setShares] = useState<BulkShare[]>([]);
   const [loading, setLoading] = useState(true);
@@ -294,10 +255,10 @@ export function BulkShareManager() {
     }
   };
 
-  const revokeAll = async () => {
-    if (!confirm(`Revoke all ${shares.length} shared links?`)) return;
+  const deleteAll = async () => {
+    if (!confirm(`Delete all ${shares.length} share links? Your notes are not deleted.`)) return;
     for (const s of shares) {
-      await send('DELETE', s.token, {}, 'All links revoked.');
+      await send('DELETE', s.token, {}, 'All share links deleted.');
     }
   };
 
@@ -306,8 +267,8 @@ export function BulkShareManager() {
       <div className="share-panel-head">
         <h2 id="bulk-shares-title" className="share-panel-title">Shared note collections</h2>
         {shares.length > 1 && (
-          <button type="button" className="btn btn-danger" onClick={revokeAll} disabled={busyToken !== null}>
-            Revoke all
+          <button type="button" className="btn btn-danger" onClick={deleteAll} disabled={busyToken !== null}>
+            Delete all share links
           </button>
         )}
       </div>
@@ -337,7 +298,6 @@ function BulkShareRow({
   busy: boolean;
   onSend: (method: 'PATCH' | 'DELETE', token: string, extra: ShareSettingsBody, message: string) => void;
 }) {
-  const [expiresInDays, setExpiresInDays] = useState(30);
   const [allowChat, setAllowChat] = useState(share.allowChat);
   const id = `bulk-${share.token.slice(0, 8)}`;
 
@@ -353,9 +313,7 @@ function BulkShareRow({
       </div>
       <ShareOptions
         idPrefix={id}
-        expiresInDays={expiresInDays}
         allowChat={allowChat}
-        onExpiresChange={setExpiresInDays}
         onAllowChatChange={(allow) => {
           if (allow && !confirm('Anyone with the link will be able to chat with AI about these notes, using your account. Allow?')) return;
           setAllowChat(allow);
@@ -363,9 +321,8 @@ function BulkShareRow({
         disabled={busy}
       />
       <div className="share-actions">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onSend('PATCH', share.token, buildShareBody(expiresInDays, allowChat), 'Settings saved.')}>Save</button>
-        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => confirm('Create a new link? The current one will stop working.') && onSend('PATCH', share.token, buildShareBody(expiresInDays, allowChat, true), 'New link created.')}>New link</button>
-        <button type="button" className="btn btn-danger" disabled={busy} onClick={() => confirm('Revoke this link?') && onSend('DELETE', share.token, {}, 'Link revoked.')}>Revoke</button>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onSend('PATCH', share.token, buildShareBody(allowChat), 'Settings saved.')}>Save</button>
+        <button type="button" className="btn btn-danger" disabled={busy} onClick={() => confirm('Delete this share link? Your notes are not deleted.') && onSend('DELETE', share.token, {}, 'Share link deleted.')}>Delete share link</button>
       </div>
     </li>
   );

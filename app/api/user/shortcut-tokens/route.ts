@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     await collection.createIndex({ userId: 1, name: 1 }, { unique: true });
     if (await collection.countDocuments({ userId }) >= 20) throw new RequestError('Maximum 20 shortcut tokens', 429);
     const { token, ...secretFields } = newShortcutSecret();
-    const record = { _id: new ObjectId(), userId, name: name.trim(), description: description?.trim() || '', ...secretFields, scopes: ['upload'], expiresAt, dailyUploadLimit: 20, dailyByteLimit: 512 * 1024 * 1024, createdAt: new Date(), lastUsed: null, isActive: true };
+    const record = { _id: new ObjectId(), userId, name: name.trim(), description: description?.trim() || '', ...secretFields, scopes: ['upload'], expiresAt, createdAt: new Date(), lastUsed: null, isActive: true };
     await collection.insertOne(record);
     const { tokenDigest: _digest, ...safeRecord } = record;
     // The bearer secret is shown only here. It cannot be recovered from storage.

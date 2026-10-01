@@ -4,7 +4,7 @@ import { ObjectId } from 'mongodb';
 import { randomBytes } from 'crypto';
 import { getCollection } from '@/lib/db';
 import { boundedJson, RequestError } from '@/lib/request-limits';
-import { shareUrl, shareOptions } from '@/lib/share';
+import { shareUrl, configuredShareOptions } from '@/lib/share';
 
 async function owner() {
   const { userId } = await auth();
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     const sets = await getCollection('shared_note_sets');
     if (await sets.countDocuments({ userId }) >= 100) throw new RequestError('Maximum 100 shared sets', 429);
     const shareToken = randomBytes(24).toString('hex');
-    const options = shareOptions(body);
+    const options = await configuredShareOptions(body);
     await sets.insertOne({ userId, shareToken, noteIds: ids, shareEnabled: true, ...options, createdAt: new Date(), sharedAt: new Date() });
     return NextResponse.json({ shareUrl: shareUrl(request, shareToken, true), token: shareToken, noteCount: ids.length, expiresAt: options.shareExpiresAt, allowChat: options.shareAllowChat });
   } catch (error) { return failure(error); }
@@ -42,8 +42,8 @@ export async function PATCH(request: NextRequest) {
     const userId = await owner();
     const body = await boundedJson(request, 8192);
     if (typeof body.token !== 'string' || !/^[a-f0-9]{48}$/.test(body.token)) throw new RequestError('Invalid share token');
-    const shareToken = body.rotate === true ? randomBytes(24).toString('hex') : body.token;
-    const options = shareOptions(body);
+    const shareToken = body.token;
+    const options = await configuredShareOptions(body);
     const result = await (await getCollection('shared_note_sets')).updateOne({ userId, shareToken: body.token }, { $set: { shareToken, shareEnabled: true, ...options } });
     if (!result.matchedCount) throw new RequestError('Shared set not found', 404);
     return NextResponse.json({ shareUrl: shareUrl(request, shareToken, true), token: shareToken, expiresAt: options.shareExpiresAt, allowChat: options.shareAllowChat });

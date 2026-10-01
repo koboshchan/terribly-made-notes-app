@@ -40,7 +40,7 @@ export async function POST(request: NextRequest, context: Context) {
     const { expiresInDays = 90 } = await boundedJson(request, 8192);
     const expiresAt = shortcutExpiry(expiresInDays);
     const { token, ...secretFields } = newShortcutSecret();
-    const result = await (await getCollection('shortcut_tokens')).findOneAndUpdate(filter, { $set: { ...secretFields, expiresAt, scopes: ['upload'], dailyUploadLimit: 20, dailyByteLimit: 512 * 1024 * 1024, isActive: true, updatedAt: new Date() }, $unset: { token: '' } }, { returnDocument: 'after', projection: { tokenDigest: 0, token: 0 } });
+    const result = await (await getCollection('shortcut_tokens')).findOneAndUpdate(filter, { $set: { ...secretFields, expiresAt, scopes: ['upload'], isActive: true, updatedAt: new Date() }, $unset: { token: '', dailyUploadLimit: '', dailyByteLimit: '' } }, { returnDocument: 'after', projection: { tokenDigest: 0, token: 0 } });
     if (!result) throw new RequestError('Token not found', 404);
     return NextResponse.json({ ...result, token }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }

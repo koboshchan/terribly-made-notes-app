@@ -4,59 +4,106 @@ import { ObjectId } from 'mongodb';
 import path from 'path';
 import { NextRequest } from 'next/server';
 import { getCollection } from './db';
-import { getNoteDir, saveFile, deleteDir } from './storage';
+import { getNoteDir, deleteDir } from './storage';
+import busboy from 'busboy';
+import { createWriteStream } from 'fs';
+import { mkdtemp, rm, mkdir, rename, copyFile, unlink } from 'fs/promises';
+import { tmpdir } from 'os';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { processingQueue } from './queue';
-import { boundedBody, RequestError } from './request-limits';
+import { RequestError } from './request-limits';
 import { randomUUID, createHash } from 'crypto';
-import { reserveUsage } from './usage';
+import { getRuntimeSettings, type RuntimeSettings } from './runtime-settings';
 
 const probe = promisify(execFile);
 const extensions = new Set(['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.mp4']);
-export const MAX_UPLOAD_BYTES = Math.min(256 * 1024 * 1024, Math.max(1024, Number(process.env.MAX_UPLOAD_BYTES) || 64 * 1024 * 1024));
-
-export async function parseUpload(request: NextRequest, shortcut = false) {
-  const bytes = await boundedBody(request, MAX_UPLOAD_BYTES + 65536);
-  const contentType = request.headers.get('content-type') || '';
-  let data: Buffer;
-  let filename: string;
-  let language: unknown = request.headers.get('language')?.toLowerCase() || 'english';
+export async function parseUpload(request: NextRequest, shortcut = false, _runtime?: RuntimeSettings) {
+  if (!request.body) throw new RequestError('Audio file required');
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'notes-upload-'));
+  const tempPath = path.join(tempDir, 'audio');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.signal.addEventListener('abort', abort, { once: true });
+  if (request.signal.aborted) abort();
+  const input = Readable.fromWeb(request.body as any);
+  let size = 0;
+  const hash = createHash('sha256');
+  const meter = new Transform({ transform(chunk, _encoding, callback) { size += chunk.length; hash.update(chunk); callback(null, chunk); } });
+  let filename = '';
+  let language = request.headers.get('language')?.toLowerCase() || 'english';
+  const fields = new Map<string, string>();
   let className: string | undefined;
   let processingPreferences: { flashcards: boolean; quiz: boolean } | undefined;
-  if (contentType.startsWith('multipart/form-data')) {
-    const form = await new Request('http://upload.invalid', { method: 'POST', headers: { 'content-type': contentType }, body: new Uint8Array(bytes) }).formData();
-    const entry = form.get(shortcut ? 'recording' : 'file');
-    if (!entry || typeof entry === 'string') throw new RequestError('Audio file required');
-    filename = path.basename(entry.name).slice(0, 255);
-    data = Buffer.from(await entry.arrayBuffer());
-    language = form.get('language') || language;
-    const manualClass = form.get('className');
-    if (manualClass !== null) {
-      if (typeof manualClass !== 'string' || manualClass.length > 100 || !manualClass.trim()) throw new RequestError('Invalid className');
-      className = manualClass.trim();
-    }
-    if (form.has('generateFlashcards') || form.has('generateQuiz')) {
-      for (const field of ['generateFlashcards', 'generateQuiz']) {
-        const value = form.get(field);
-        if (value !== null && value !== 'true' && value !== 'false') throw new RequestError('Study preference must be true or false');
+  let fileWrite: Promise<void> | undefined;
+  try {
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.toLowerCase().startsWith('multipart/form-data')) {
+      // Limits apply to metadata only. File bytes have no application cap.
+      const parser = busboy({ headers: { 'content-type': contentType }, limits: { files: 1, fields: 10, parts: 11, fieldSize: 1024, fieldNameSize: 100 } });
+      let invalid: RequestError | undefined;
+      const fail = (message: string) => { invalid ??= new RequestError(message); controller.abort(); };
+      parser.on('filesLimit', () => fail('Only one audio file is allowed'));
+      parser.on('fieldsLimit', () => fail('Too many upload fields'));
+      parser.on('partsLimit', () => fail('Too many upload parts'));
+      parser.on('field', (name, value, info) => {
+        if (info.valueTruncated || info.nameTruncated || fields.has(name)) { fail('Invalid or duplicate upload field'); return; }
+        fields.set(name, value);
+      });
+      parser.on('file', (name, file, info) => {
+        if (name !== (shortcut ? 'recording' : 'file') || !info.filename) { file.resume(); fail('Audio file required'); return; }
+        filename = path.basename(info.filename).slice(0, 255);
+        if (!extensions.has(path.extname(filename).toLowerCase())) { file.resume(); fail('Unsupported audio extension'); return; }
+        fileWrite = pipeline(file, meter, createWriteStream(tempPath, { flags: 'wx', mode: 0o600 }), { signal: controller.signal });
+        // Attach a rejection handler immediately; await the settled pipeline below.
+        void fileWrite.catch(() => controller.abort());
+      });
+      try { await pipeline(input, parser, { signal: controller.signal }); }
+      catch (error) { throw invalid || error; }
+      if (!fileWrite) throw new RequestError('Audio file required');
+      await fileWrite;
+      if (invalid) throw invalid;
+      language = fields.get('language') || language;
+      if (fields.has('className')) {
+        const value = fields.get('className')!;
+        if (value.length > 100 || !value.trim()) throw new RequestError('Invalid className');
+        className = value.trim();
       }
-      processingPreferences = { flashcards: form.get('generateFlashcards') !== 'false', quiz: form.get('generateQuiz') !== 'false' };
-    }
-  } else if (shortcut) {
-    const mimeExtensions: Record<string, string> = { 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/flac': '.flac', 'audio/ogg': '.ogg', 'audio/webm': '.webm' };
-    const ext = mimeExtensions[contentType.split(';')[0].trim().toLowerCase()];
-    if (!ext) throw new RequestError('Unsupported audio Content-Type');
-    filename = `recording${ext}`;
-    data = Buffer.from(bytes);
-  } else throw new RequestError('Multipart audio file required');
-  if (!extensions.has(path.extname(filename).toLowerCase())) throw new RequestError('Unsupported audio extension');
-  if (!data.length || data.length > MAX_UPLOAD_BYTES) throw new RequestError('Audio file empty or too large', 413);
-  if (language !== 'english' && language !== 'other') throw new RequestError('Invalid language');
-  return { data, filename, language: language as 'english' | 'other', className, processingPreferences };
+      if (fields.has('generateFlashcards') || fields.has('generateQuiz')) {
+        for (const field of ['generateFlashcards', 'generateQuiz']) {
+          const value = fields.get(field);
+          if (value !== undefined && value !== 'true' && value !== 'false') throw new RequestError('Study preference must be true or false');
+        }
+        processingPreferences = { flashcards: fields.get('generateFlashcards') !== 'false', quiz: fields.get('generateQuiz') !== 'false' };
+      }
+    } else if (shortcut) {
+      const mimeExtensions: Record<string, string> = { 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/flac': '.flac', 'audio/ogg': '.ogg', 'audio/webm': '.webm' };
+      const ext = mimeExtensions[contentType.split(';')[0].trim().toLowerCase()];
+      if (!ext) throw new RequestError('Unsupported audio Content-Type');
+      filename = `recording${ext}`;
+      await pipeline(input, meter, createWriteStream(tempPath, { flags: 'wx', mode: 0o600 }), { signal: controller.signal });
+    } else throw new RequestError('Multipart audio file required');
+    if (!size) throw new RequestError('Audio file empty');
+    if (language !== 'english' && language !== 'other') throw new RequestError('Invalid language');
+    return { tempPath, tempDir, size, sha256: hash.digest('hex'), filename, language: language as 'english' | 'other', className, processingPreferences };
+  } catch (error) {
+    controller.abort();
+    input.destroy();
+    await fileWrite?.catch(() => {});
+    await rm(tempDir, { recursive: true, force: true });
+    if (error instanceof RequestError) throw error;
+    throw new RequestError('Malformed or interrupted audio upload');
+  } finally { request.signal.removeEventListener('abort', abort); }
 }
 
-export async function acceptUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null) {
-  // Serialize quota admission and insertion across replicas for the same user.
-  // Byte/count reservations themselves already use atomic Mongo updates.
+export async function acceptUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null, runtime?: RuntimeSettings) {
+  try { return await acceptUploadLocked(userId, upload, source, idempotencyKey, runtime); }
+  finally { await rm(upload.tempDir, { recursive: true, force: true }); }
+}
+
+async function acceptUploadLocked(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null, runtime?: RuntimeSettings) {
+  runtime ??= await getRuntimeSettings();
+  // Serialize concurrent-processing admission across replicas for the same user.
   const locks = await getCollection('upload_admission');
   await locks.createIndex({ key: 1 }, { unique: true });
   const key = createHash('sha256').update(userId).digest('hex');
@@ -67,14 +114,14 @@ export async function acceptUpload(userId: string, upload: Awaited<ReturnType<ty
   const claim = await locks.updateOne({ key, leaseUntil: { $lte: new Date() } }, { $set: { owner, leaseUntil: new Date(Date.now() + 90000) } });
   if (!claim.modifiedCount) throw new RequestError('Another upload is being admitted. Retry shortly.', 409);
   const heartbeat = setInterval(() => { void locks.updateOne({ key, owner }, { $set: { leaseUntil: new Date(Date.now() + 90000) } }).catch(console.error); }, 15000);
-  try { return await admitUpload(userId, upload, source, idempotencyKey); }
+  try { return await admitUpload(userId, upload, runtime, source, idempotencyKey); }
   finally {
     clearInterval(heartbeat);
     await locks.updateOne({ key, owner }, { $set: { owner: null, leaseUntil: new Date(0) } });
   }
 }
 
-async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null) {
+async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, runtime: RuntimeSettings, source?: string, idempotencyKey?: string | null) {
   const notes = await getCollection('notes');
   if (idempotencyKey && !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey)) throw new RequestError('Invalid idempotency key');
   if (idempotencyKey) {
@@ -82,23 +129,26 @@ async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof par
     const existing = await notes.findOne({ userId, idempotencyKey });
     if (existing) return { noteId: existing._id.toString(), filename: upload.filename };
   }
-  await reserveUsage(`upload-count:${userId}`, 100, 86400000);
-  await reserveUsage(`upload-bytes:${userId}`, Number(process.env.MAX_DAILY_UPLOAD_BYTES) || 2 * 1024 ** 3, 86400000, upload.data.length);
-  if (await notes.countDocuments({ userId, status: 'processing' }) >= 5) throw new RequestError('Too many processing notes', 429);
-  const storage = await notes.aggregate([{ $match: { userId } }, { $group: { _id: null, bytes: { $sum: '$fileSize' } } }]).next();
-  if ((storage?.bytes || 0) + upload.data.length > (Number(process.env.MAX_USER_STORAGE_BYTES) || 10 * 1024 ** 3)) throw new RequestError('Note storage limit reached', 429);
+  if (await notes.countDocuments({ userId, status: 'processing' }) >= runtime.maxProcessingNotes) throw new RequestError('Too many processing notes', 429);
   const noteId = new ObjectId();
   const noteDir = getNoteDir(userId, noteId.toString());
   // Never interpolate a client filename into a path or subprocess.
   const originalPath = path.join(noteDir, 'original.audio');
   try {
-    saveFile(originalPath, upload.data);
-    const { stdout } = await probe('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', originalPath], { timeout: 30000, maxBuffer: 1024 * 1024 });
+    await mkdir(noteDir, { recursive: true });
+    try { await rename(upload.tempPath, originalPath); }
+    catch (error: any) {
+      if (error?.code !== 'EXDEV') throw error;
+      // Cross-device copy stays disk-to-disk, without buffering file contents.
+      await copyFile(upload.tempPath, originalPath);
+      await unlink(upload.tempPath);
+    }
+    const { stdout } = await probe('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', originalPath], { timeout: runtime.mediaTimeoutSeconds * 1000, maxBuffer: 1024 * 1024 });
     const info = JSON.parse(stdout);
     const stream = info.streams?.find((s: any) => s.codec_type === 'audio');
     const duration = Number(info.format?.duration);
-    if (!stream || info.streams?.some((s: any) => s.codec_type !== 'audio' && s.disposition?.attached_pic !== 1) || !Number.isFinite(duration) || duration <= 0 || duration > (Number(process.env.MAX_AUDIO_SECONDS) || 4 * 3600)) throw new RequestError('Invalid audio or duration limit exceeded');
-    await notes.insertOne({ _id: noteId, userId, title: `Processing: ${upload.filename}`, description: 'Processing audio file...', content: '', status: 'processing', originalFileName: upload.filename, fileSize: upload.data.length, language: upload.language, duration, bitrate: Number(info.format?.bit_rate) || undefined, sampleRate: Number(stream.sample_rate) || undefined, channels: stream.channels, format: info.format?.format_name, recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), ...(source ? { source } : {}), ...(upload.className ? { noteClass: upload.className, classificationSource: 'manual' } : {}), ...(upload.processingPreferences ? { processingPreferences: upload.processingPreferences } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
+    if (!stream || info.streams?.some((s: any) => s.codec_type !== 'audio' && s.disposition?.attached_pic !== 1) || !Number.isFinite(duration) || duration <= 0 || duration > runtime.audioMaxSeconds) throw new RequestError('Invalid audio or duration limit exceeded');
+    await notes.insertOne({ _id: noteId, userId, title: `Processing: ${upload.filename}`, description: 'Processing audio file...', content: '', status: 'processing', originalFileName: upload.filename, fileSize: upload.size, sha256: upload.sha256, language: upload.language, duration, bitrate: Number(info.format?.bit_rate) || undefined, sampleRate: Number(stream.sample_rate) || undefined, channels: stream.channels, format: info.format?.format_name, recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), ...(source ? { source } : {}), ...(upload.className ? { noteClass: upload.className, classificationSource: 'manual' } : {}), ...(upload.processingPreferences ? { processingPreferences: upload.processingPreferences } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
     await processingQueue.enqueue({ id: `${userId}_${noteId}`, userId, noteId: noteId.toString(), originalPath, mp3Path: path.join(noteDir, 'converted.mp3'), markdownPath: path.join(noteDir, 'output.md'), language: upload.language });
     return { noteId: noteId.toString(), filename: upload.filename };
   } catch (error: any) {

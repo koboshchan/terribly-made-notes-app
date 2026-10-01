@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { uploadUserId } from '@/lib/upload-auth';
 import { parseUpload, acceptUpload } from '@/lib/upload';
 import { RequestError } from '@/lib/request-limits';
+import { getRuntimeSettings } from '@/lib/runtime-settings';
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const userId = await uploadUserId(request);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const result = await acceptUpload(userId, await parseUpload(request), undefined, request.headers.get('idempotency-key'));
+    const runtime = await getRuntimeSettings();
+    const result = await acceptUpload(userId, await parseUpload(request, false, runtime), undefined, request.headers.get('idempotency-key'), runtime);
     return NextResponse.json({ ...result, message: 'File uploaded successfully and queued for processing' });
   } catch (error) {
     console.error('Upload error:', error);

@@ -192,6 +192,7 @@ class ProcessingQueue {
           },
           transcription: {
             parallel: globalSettings.settings.pipeline.transcription?.parallel ?? defaultPipelineSettings.transcription.parallel,
+            concurrency: globalSettings.settings.pipeline.transcription?.concurrency,
           },
           summarization: {
             parallel: globalSettings.settings.pipeline.summarization?.parallel ?? defaultPipelineSettings.summarization.parallel,

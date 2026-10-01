@@ -3,6 +3,8 @@ import { auth } from '@clerk/nextjs/server';
 import { getCollection } from '@/lib/db';
 import { isUserAdmin } from '@/lib/admin';
 import { processingQueue, PipelineSettings, defaultPipelineSettings } from '@/lib/queue';
+import { boundedJson, RequestError } from '@/lib/request-limits';
+import { runtimeDefaults, validateRuntime, shareExpiryDays, capabilityDefaults, validateCapabilities, validatePipeline, normalizedPipeline } from '@/lib/runtime-settings';
 
 interface GlobalModelSettings {
   stt: {
@@ -119,6 +121,13 @@ export async function GET(request: NextRequest) {
       };
     }
 
+    settings = {
+      ...settings,
+      runtime: { ...runtimeDefaults(), ...validateRuntime(settings.runtime) },
+      pipeline: normalizedPipeline(settings.pipeline, defaultPipelineSettings),
+      shareExpiryDays: shareExpiryDays(settings.shareExpiryDays),
+      stt: { ...settings.stt, capabilities: { ...capabilityDefaults(), ...validateCapabilities(settings.stt?.capabilities) } },
+    };
     return NextResponse.json(settings);
   } catch (error) {
     console.error('Failed to fetch global model settings:', error);
@@ -141,7 +150,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
     }
 
-    const settings = await request.json();
+    const settings = await boundedJson(request, 131072);
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new RequestError('Invalid global settings');
+    settings.runtime = { ...runtimeDefaults(), ...validateRuntime(settings.runtime) };
+    settings.shareExpiryDays = shareExpiryDays(settings.shareExpiryDays);
+    validatePipeline(settings.pipeline);
+    settings.pipeline = normalizedPipeline(settings.pipeline, defaultPipelineSettings);
+    if (!settings.stt || !settings.llm || !settings.tts) throw new RequestError('Missing model settings');
+    settings.stt.capabilities = { ...capabilityDefaults(), ...validateCapabilities(settings.stt.capabilities) };
     const globalSettingsCollection = await getCollection('global_settings');
 
     const existingSettings = await globalSettingsCollection.findOne({ type: 'models' });
@@ -176,8 +192,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Failed to save global model settings:', error);
     return NextResponse.json(
-      { error: 'Failed to save global model settings' },
-      { status: 500 }
+      { error: error instanceof RequestError ? error.message : 'Failed to save global model settings' },
+      { status: error instanceof RequestError ? error.status : 500 }
     );
   }
 }
