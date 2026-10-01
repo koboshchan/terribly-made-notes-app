@@ -3,6 +3,7 @@
 import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { ShareOptions, ShareWarning, buildShareBody } from "@/app/components/ShareControls";
 
 interface Note {
   _id: string;
@@ -35,6 +36,8 @@ export default function Home() {
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [bulkShareLink, setBulkShareLink] = useState<string>('');
   const [bulkShareLoading, setBulkShareLoading] = useState(false);
+  const [bulkExpiresInDays, setBulkExpiresInDays] = useState(30);
+  const [bulkAllowChat, setBulkAllowChat] = useState(false);
   const pendingRefresh = useRef<Set<string>>(new Set());
   const lastSelectedIndex = useRef<number>(-1);
   const [retryingNotes, setRetryingNotes] = useState<{[key: string]: boolean}>({});
@@ -256,7 +259,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ noteIds: selectedShareableIds }),
+        body: JSON.stringify({ noteIds: selectedShareableIds, ...buildShareBody(bulkExpiresInDays, bulkAllowChat) }),
       });
 
       if (!response.ok) {
@@ -351,16 +354,31 @@ export default function Home() {
           )}
         </div>
 
-        {isSelectionMode && bulkShareLink && (
+        {isSelectionMode && (
           <div className="card bulk-share-link-card">
-            <p className="bulk-share-link-title">Bulk share link</p>
-            <input
-              type="text"
-              readOnly
-              value={bulkShareLink}
-              className="form-input"
-              aria-label="Bulk share link"
-            />
+            <p className="bulk-share-link-title">{bulkShareLink ? 'Bulk share link' : 'Share settings for selected notes'}</p>
+            <ShareWarning />
+            {bulkShareLink ? (
+              <input
+                type="text"
+                readOnly
+                value={bulkShareLink}
+                className="form-input"
+                aria-label="Bulk share link"
+              />
+            ) : (
+              <ShareOptions
+                idPrefix="bulk-new"
+                expiresInDays={bulkExpiresInDays}
+                allowChat={bulkAllowChat}
+                onExpiresChange={setBulkExpiresInDays}
+                onAllowChatChange={(allow) => {
+                  if (allow && !confirm('Anyone with the link will be able to chat with AI about these notes, using your account. Allow?')) return;
+                  setBulkAllowChat(allow);
+                }}
+              />
+            )}
+            <p className="share-muted"><Link href="/settings#shared-links">Manage shared links</Link></p>
           </div>
         )}
 

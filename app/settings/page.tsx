@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { BulkShareManager } from "@/app/components/ShareControls";
 
 interface UserClass {
   _id: string;
@@ -552,6 +553,9 @@ export default function UserSettings() {
           </div>
         </div>
 
+      </div>
+      <div id="shared-links" style={{ marginTop: '20px' }}>
+        <BulkShareManager />
       </div>
     </div>
   );
