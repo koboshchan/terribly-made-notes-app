@@ -40,6 +40,9 @@ export default function Home() {
   const [bulkAllowChat, setBulkAllowChat] = useState(false);
   const pendingRefresh = useRef<Set<string>>(new Set());
   const lastSelectedIndex = useRef<number>(-1);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [retryingNotes, setRetryingNotes] = useState<{[key: string]: boolean}>({});
 
   const handleDashboardRetry = async (noteId: string) => {
@@ -49,7 +52,7 @@ export default function Home() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchNotes();
+        setNotes(prev => prev.map(n => n._id === noteId ? { ...n, status: 'processing' } : n));
       } else {
         const errData = await response.json();
         alert(errData.error || 'Failed to retry');
@@ -93,24 +96,43 @@ export default function Home() {
     }
   }, [notes]);
 
-  const fetchNotes = async () => {
+  const PAGE_SIZE = 50;
+
+  const fetchNotes = async (pageToLoad = 0) => {
+    if (pageToLoad > 0) setLoadingMore(true);
     try {
       const params = new URLSearchParams({
         sortBy,
         sortOrder,
         search: searchTerm,
+        page: String(pageToLoad),
+        limit: String(PAGE_SIZE),
       });
       const response = await fetch(`/api/notes?${params}`);
       if (response.ok) {
-        const data = await response.json();
-        setNotes(data);
-        setFilteredNotes(data);
+        const data: Note[] = (await response.json()).map((n: Note & { class?: string }) => ({ ...n, noteClass: n.class ?? n.noteClass }));
+        setHasMore(response.headers.get('X-Has-More') === 'true');
+        setPage(pageToLoad);
+        if (pageToLoad === 0) {
+          setNotes(data);
+        } else {
+          // Append, de-duplicating notes that shifted across page boundaries
+          setNotes(prev => {
+            const seen = new Set(prev.map(n => n._id));
+            return [...prev, ...data.filter(n => !seen.has(n._id))];
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to fetch notes:', error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  const loadMore = () => {
+    if (!loadingMore && hasMore) fetchNotes(page + 1);
   };
 
   // Filter and sort notes when search term or sort options change
@@ -173,8 +195,7 @@ export default function Home() {
                 setFilteredNotes(prev => prev.map(n => n._id === noteId ? updatedNote : n));
               }
             } catch {
-              // fall back to full refresh if individual fetch fails
-              fetchNotes();
+              // leave the note as-is; next poll or manual reload will reconcile
             }
           }, 1000);
         }
@@ -564,6 +585,13 @@ export default function Home() {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {!loading && hasMore && (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <button onClick={loadMore} className="btn btn-secondary" disabled={loadingMore}>
+                {loadingMore ? 'Loading...' : 'Load more notes'}
+              </button>
             </div>
           )}
         </div>
