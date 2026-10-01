@@ -51,7 +51,14 @@ export default function PrivacyPage() {
       <p>
         Your data stays until you delete it or delete your account. You can delete individual notes at any
         time. When you delete your account, your file key is destroyed first, which makes the encrypted files
-        unreadable, and then your notes and files are deleted on a best-effort basis.
+        unreadable. Then all live data tied to your account is permanently deleted from MongoDB and disk: notes,
+        transcripts, summaries, study materials, share links, shortcut tokens, processing jobs, settings, any
+        chat history stored on the server, and your files. If that cleanup is interrupted, it is retried when
+        Clerk sends its signed account-deletion notice, so it can take a little while to finish.
+      </p>
+      <p>
+        We keep a small permanent deletion record and nonce safety records so a key for your account can never
+        be recreated or reused. These contain no note content or files.
       </p>
       <p>
         Backups are a limit here. A backup made before deletion may still contain your notes and your file
