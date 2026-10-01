@@ -2,16 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCollection } from '@/lib/db';
 import { parseUpload, acceptUpload } from '@/lib/upload';
 import { RequestError } from '@/lib/request-limits';
+import { tokenDigest } from '@/lib/shortcut-tokens';
+import { reserveUsage } from '@/lib/usage';
 
 export async function PUT(request: NextRequest) {
   try {
     const header = request.headers.get('authorization');
     if (!header?.startsWith('Bearer ')) return NextResponse.json({ error: 'Bearer token required' }, { status: 401 });
     const tokens = await getCollection('shortcut_tokens');
-    const token = await tokens.findOne({ token: header.slice(7).trim(), isActive: true });
-    if (!token) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    const secret = header.slice(7).trim();
+    if (!/^[a-f0-9]{64}$/.test(secret)) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    const token = await tokens.findOne({ tokenDigest: tokenDigest(secret), isActive: true, scopes: 'upload', expiresAt: { $gt: new Date() } });
+    if (!token) return NextResponse.json({ error: 'Token invalid, expired, or missing upload scope' }, { status: 401 });
+    await reserveUsage(`shortcut-count:${token._id}`, Math.min(20, Number(token.dailyUploadLimit) || 20), 86400000);
+    const upload = await parseUpload(request, true);
+    await reserveUsage(`shortcut-bytes:${token._id}`, Math.min(512 * 1024 * 1024, Number(token.dailyByteLimit) || 512 * 1024 * 1024), 86400000, upload.data.length);
     await tokens.updateOne({ _id: token._id }, { $set: { lastUsed: new Date() } });
-    const result = await acceptUpload(token.userId, await parseUpload(request, true), 'Apple Shortcut', request.headers.get('idempotency-key'));
+    const result = await acceptUpload(token.userId, upload, 'Apple Shortcut', request.headers.get('idempotency-key'));
     return NextResponse.json({ ...result, success: true, message: 'Recording queued for processing' });
   } catch (error) {
     console.error('Shortcut upload error:', error);
