@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import { getCollection } from './db';
 export type PipelineStage =
   | 'audioNormalization'
   | 'transcription'
@@ -65,6 +67,21 @@ export interface QueueItem {
 }
 
 class ProcessingQueue {
+  private workerId = randomUUID();
+  private timer = setInterval(() => { void this.dispatch().catch(console.error); }, 5000).unref();
+
+  private async persist(item: QueueItem): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { ...item, leaseOwner: null, leaseUntil: new Date(0) } });
+  }
+
+  async getPersistedProgress(id: string) {
+    await this.dispatch();
+    const jobs = await getCollection('processing_jobs');
+    const job = await jobs.findOne({ id });
+    if (!job) return this.getProgress(id);
+    return { queueProgress: job.stageStatus === 'active' ? 100 : 0, processProgress: job.progress, percent: job.progress, status: job.status, message: job.error || job.currentStage, error: job.error };
+  }
   private queue: QueueItem[] = [];
   private cachedPipelineSettings: PipelineSettings = defaultPipelineSettings;
   private lastSettingsFetch = 0;
@@ -80,21 +97,15 @@ class ProcessingQueue {
     markdownPath: string;
     language?: 'english' | 'other';
   }): void {
-    // Remove existing item with same ID if any to prevent duplicates during retry
-    this.queue = this.queue.filter(q => q.id !== item.id);
+    void this.enqueue(item).catch(console.error);
+  }
 
-    const newItem: QueueItem = {
-      ...item,
-      language: item.language || 'english',
-      status: 'queued',
-      currentStage: 'audioNormalization',
-      stageStatus: 'waiting',
-      progress: 0,
-      addedAt: Date.now(),
-    };
-
-    this.queue.push(newItem);
-    this.dispatch();
+  async enqueue(item: { id: string; userId: string; noteId: string; originalPath: string; mp3Path: string; markdownPath: string; language?: 'english' | 'other' }): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    await jobs.createIndex({ id: 1 }, { unique: true });
+    await jobs.createIndex({ stageStatus: 1, leaseUntil: 1, addedAt: 1 });
+    await jobs.updateOne({ id: item.id }, { $setOnInsert: { ...item, status: 'queued', currentStage: 'audioNormalization', stageStatus: 'waiting', progress: 0, addedAt: Date.now(), leaseUntil: new Date(0) } }, { upsert: true });
+    await this.dispatch();
   }
 
   getItem(id: string): QueueItem | undefined {
@@ -195,6 +206,15 @@ class ProcessingQueue {
     try {
       do {
         this.needsRedispatch = false;
+        const jobs = await getCollection('processing_jobs');
+        await jobs.updateMany({ stageStatus: 'active', leaseUntil: { $lt: new Date() } }, { $set: { stageStatus: 'waiting', leaseOwner: null } });
+        const pending = await jobs.find({ stageStatus: 'waiting' }).toArray();
+        for (const doc of pending) {
+          if (!this.queue.some(q => q.id === doc.id && q.stageStatus === 'active')) {
+            this.queue = this.queue.filter(q => q.id !== doc.id);
+            this.queue.push(doc as unknown as QueueItem);
+          }
+        }
         this.cleanupOldItems();
 
         const pipelineSettings = await this.getPipelineSettings();
@@ -239,6 +259,10 @@ class ProcessingQueue {
   }
 
   private async executeStage(item: QueueItem, stage: PipelineStage): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    const claim = await jobs.findOneAndUpdate({ id: item.id, stageStatus: 'waiting' }, { $set: { stageStatus: 'active', leaseOwner: this.workerId, leaseUntil: new Date(Date.now() + 60000) } }, { returnDocument: 'after' });
+    if (!claim) { this.queue = this.queue.filter(q => q !== item); return; }
+    const heartbeat = setInterval(() => { void jobs.updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { leaseUntil: new Date(Date.now() + 60000), progress: item.progress } }).catch(console.error); }, 15000);
     try {
       if (stage === 'audioNormalization') {
         await this.executeAudioNormalization(item);
@@ -274,6 +298,8 @@ class ProcessingQueue {
         console.error('Failed to update database with error status:', dbError);
       }
     } finally {
+      clearInterval(heartbeat);
+      await this.persist(item);
       // Trigger dispatch so the next item waiting in this stage or next stage can execute immediately
       this.dispatch();
     }
@@ -322,6 +348,8 @@ class ProcessingQueue {
     });
 
     item.transcription = transcription;
+    const { saveFile } = await import('./storage');
+    saveFile(item.markdownPath.replace(/\.md$/, '.txt'), transcription);
     item.progress = 70;
     item.currentStage = 'summarization';
     item.stageStatus = 'waiting';
@@ -403,7 +431,8 @@ class ProcessingQueue {
       updatedAt: new Date(),
     };
 
-    if (item.summary.noteClass) {
+    const existingNote = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    if (item.summary.noteClass && existingNote?.classificationSource !== 'manual') {
       updateData.noteClass = item.summary.noteClass;
     }
 
