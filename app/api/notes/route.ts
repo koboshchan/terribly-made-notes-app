@@ -5,47 +5,25 @@ import { getCollection } from '@/lib/db';
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const p = new URL(request.url).searchParams;
+    const search = (p.get('search') || '').slice(0, 200).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const limit = Math.min(100, Math.max(1, Number(p.get('limit')) || 50));
+    const page = Math.max(0, Math.min(10000, Math.floor(Number(p.get('page')) || 0)));
+    const sortField = p.get('sortBy') === 'recorded' ? 'recordedAt' : 'createdAt';
+    const direction = p.get('sortOrder') === 'asc' ? 1 : -1;
+    const query: any = { userId };
+    if (search) query.$or = [{ title: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
+    if (p.has('updatedSince')) {
+      const date = new Date(p.get('updatedSince')!);
+      if (!Number.isFinite(date.getTime())) return NextResponse.json({ error: 'Invalid updatedSince' }, { status: 400 });
+      query.updatedAt = { $gt: date };
     }
-
-    const { searchParams } = new URL(request.url);
-    const sortBy = searchParams.get('sortBy') || 'uploaded';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
-    const search = searchParams.get('search') || '';
-
-    const notesCollection = await getCollection('notes');
-
-    // Build search query
-    let query: any = { userId };
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Build sort object
-    const sortField = sortBy === 'recorded' ? 'recordedAt' : 'createdAt';
-    const sortDirection = sortOrder === 'desc' ? -1 : 1;
-    const sortObj: any = { [sortField]: sortDirection };
-
-    // Add secondary sort by createdAt if sorting by recordedAt
-    if (sortBy === 'recorded') {
-      sortObj.createdAt = sortDirection;
-    }
-
-    const notes = await notesCollection
-      .find(query)
-      .sort(sortObj)
-      .toArray();
-
-    return NextResponse.json(notes);
+    const notes = await (await getCollection('notes')).find(query).project({ userId: 0, content: 0, flashcards: 0, quizQuestions: 0, shareToken: 0, idempotencyKey: 0, processingPreferences: 0 }).sort({ [sortField]: direction, _id: direction }).skip(page * limit).limit(limit + 1).toArray();
+    const hasMore = notes.length > limit;
+    return NextResponse.json(notes.slice(0, limit).map(n => ({ ...n, class: n.noteClass || null })), { headers: { 'X-Has-More': String(hasMore), 'X-Page': String(page), 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('Failed to fetch notes:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch notes' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 });
   }
 }
