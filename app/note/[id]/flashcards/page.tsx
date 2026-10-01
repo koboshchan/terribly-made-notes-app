@@ -11,7 +11,7 @@ interface Flashcard {
 }
 
 export default function FlashcardsPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
@@ -45,7 +45,7 @@ export default function FlashcardsPage() {
         const cards = data.flashcards || [];
         setFlashcards(cards);
         if (cards.length > 0) {
-          const saved = loadProgress<{ index: number }>(`flashcards:${id}`);
+          const saved = loadProgress<{ index: number }>(userId, `flashcards:${id}`);
           setCurrentIndex(saved && saved.index < cards.length ? saved.index : 0);
         }
       } else if (response.status === 404) {
@@ -60,9 +60,9 @@ export default function FlashcardsPage() {
 
   useEffect(() => {
     if (flashcards.length > 0) {
-      saveProgress(`flashcards:${params.id}`, { index: currentIndex });
+      saveProgress(userId, `flashcards:${params.id}`, { index: currentIndex });
     }
-  }, [currentIndex, flashcards.length, params.id]);
+  }, [currentIndex, flashcards.length, params.id, userId]);
 
   const nextCard = () => {
     if (currentIndex < flashcards.length - 1) {

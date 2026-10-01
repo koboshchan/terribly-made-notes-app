@@ -21,7 +21,7 @@ interface ChatMessage {
 }
 
 export default function NoteChatPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [note, setNote] = useState<Note | null>(null);
@@ -51,9 +51,9 @@ export default function NoteChatPage() {
   useEffect(() => {
     scrollToBottom();
     if (note && chatMessages.length > 1) {
-      saveProgress(`chat:${note._id}`, trimChat(chatMessages));
+      saveProgress(userId, `chat:${note._id}`, trimChat(chatMessages));
     }
-  }, [chatMessages, note]);
+  }, [chatMessages, note, userId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -66,7 +66,7 @@ export default function NoteChatPage() {
       if (response.ok) {
         const data = await response.json();
         setNote(data);
-        const saved = loadProgress<ChatMessage[]>(`chat:${data._id}`);
+        const saved = loadProgress<ChatMessage[]>(userId, `chat:${data._id}`);
         if (Array.isArray(saved) && saved.length > 0) {
           setChatMessages(saved);
           return;
@@ -128,7 +128,7 @@ export default function NoteChatPage() {
   };
 
   const clearChat = () => {
-    if (note) clearProgress(`chat:${note._id}`);
+    if (note) clearProgress(userId, `chat:${note._id}`);
     setChatMessages([{
       role: 'assistant',
       content: `Hi! I'm here to help you with questions about "${note?.title}". What would you like to know?`

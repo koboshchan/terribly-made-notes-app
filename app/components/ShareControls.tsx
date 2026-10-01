@@ -13,7 +13,7 @@ const EXPIRY_OPTIONS: { label: string; value: number }[] = [
   { label: '7 days', value: 7 },
   { label: '30 days', value: 30 },
   { label: '90 days', value: 90 },
-  { label: 'Never', value: 0 },
+  { label: '365 days (max)', value: 365 },
 ];
 
 export function formatExpiry(expiresAt: string | null | undefined): string {
@@ -90,9 +90,10 @@ export function ShareOptions({
   );
 }
 
-/** Body sent to the API. expiresInDays 0 means "never" and is sent as 0. */
+/** Body sent to the API. Server requires expiresInDays in 1-365; always send a JSON body. */
 export function buildShareBody(expiresInDays: number, allowChat: boolean, rotate?: boolean): ShareSettingsBody {
-  const body: ShareSettingsBody = { expiresInDays, allowChat };
+  const days = Number.isFinite(expiresInDays) ? Math.min(365, Math.max(1, Math.round(expiresInDays))) : 30;
+  const body: ShareSettingsBody = { expiresInDays: days, allowChat };
   if (rotate) body.rotate = true;
   return body;
 }

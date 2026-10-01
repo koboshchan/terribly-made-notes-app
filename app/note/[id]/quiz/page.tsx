@@ -14,7 +14,7 @@ interface QuizQuestion {
 }
 
 export default function QuizPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
@@ -60,7 +60,7 @@ export default function QuizPage() {
           return answers.sort(() => Math.random() - 0.5);
         });
           setRandomizedAnswers(randomized);
-          const saved = loadProgress<{ index: number; completed: boolean }>(`quiz:${id}`);
+          const saved = loadProgress<{ index: number; completed: boolean }>(userId, `quiz:${id}`);
           if (saved && saved.index < questions.length) {
             setCurrentIndex(saved.index);
             setQuizCompleted(Boolean(saved.completed));
@@ -81,9 +81,9 @@ export default function QuizPage() {
 
   useEffect(() => {
     if (quizQuestions.length > 0) {
-      saveProgress(`quiz:${params.id}`, { index: currentIndex, completed: quizCompleted });
+      saveProgress(userId, `quiz:${params.id}`, { index: currentIndex, completed: quizCompleted });
     }
-  }, [currentIndex, quizCompleted, quizQuestions.length, params.id]);
+  }, [currentIndex, quizCompleted, quizQuestions.length, params.id, userId]);
 
   const selectAnswer = (index: number) => {
     setSelectedAnswer(index);
@@ -110,7 +110,7 @@ export default function QuizPage() {
   };
 
   const restartQuiz = () => {
-    clearProgress(`quiz:${params.id}`);
+    clearProgress(userId, `quiz:${params.id}`);
     const randomized = quizQuestions.map((q: QuizQuestion) => {
       const answers = [
         { text: q.correctAnswer, isCorrect: true },
