@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCollection } from '@/lib/db';
+import { activeShareFilter } from '@/lib/share';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +13,7 @@ export async function GET(
     const note = await notesCollection.findOne({
       shareToken: token,
       shareEnabled: true,
+      ...activeShareFilter(),
       status: 'completed',
     });
 

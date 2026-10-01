@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
+import { activeShareFilter } from '@/lib/share';
 
 type SharedSet = {
   noteIds: ObjectId[];
@@ -22,6 +23,7 @@ export async function GET(
     const sharedSet = await sharedNoteSetsCollection.findOne({
       shareToken: token,
       shareEnabled: true,
+      ...activeShareFilter(),
       noteIds: noteObjectId,
     }) as SharedSet | null;
 
