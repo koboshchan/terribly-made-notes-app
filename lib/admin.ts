@@ -7,7 +7,15 @@ export async function isUserAdmin(userId: string): Promise<boolean> {
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(userId);
-    return user.privateMetadata?.admin === true;
+    // Match cal: initialize only a missing key, preserving all other metadata
+    // and never overwriting an admin value already set manually in Clerk.
+    if (user.privateMetadata?.admin === undefined) {
+      await client.users.updateUserMetadata(userId, {
+        privateMetadata: { ...user.privateMetadata, admin: false },
+      });
+      return false;
+    }
+    return user.privateMetadata.admin === true;
   } catch (error) {
     console.error('Error checking Clerk admin metadata:', error);
     return false;

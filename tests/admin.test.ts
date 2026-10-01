@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getUser, client } = vi.hoisted(() => {
+const { getUser, updateUserMetadata, client } = vi.hoisted(() => {
   const getUser = vi.fn();
-  return { getUser, client: vi.fn(async () => ({ users: { getUser } })) };
+  const updateUserMetadata = vi.fn();
+  return { getUser, updateUserMetadata, client: vi.fn(async () => ({ users: { getUser, updateUserMetadata } })) };
 });
 vi.mock('@clerk/nextjs/server', () => ({ clerkClient: client }));
 import { isUserAdmin } from '../lib/admin';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  client.mockResolvedValue({ users: { getUser } });
+  client.mockResolvedValue({ users: { getUser, updateUserMetadata } });
+  updateUserMetadata.mockResolvedValue({});
 });
 
 describe('Clerk private admin metadata', () => {
@@ -25,6 +27,28 @@ describe('Clerk private admin metadata', () => {
       expect(await isUserAdmin('user_other')).toBe(false);
     },
   );
+
+  it('initializes a missing admin to false while preserving unrelated metadata', async () => {
+    getUser.mockResolvedValue({ privateMetadata: { theme: 'dark' } });
+    expect(await isUserAdmin('user_new')).toBe(false);
+    expect(updateUserMetadata).toHaveBeenCalledWith('user_new', {
+      privateMetadata: { theme: 'dark', admin: false },
+    });
+  });
+
+  it.each([false, true, 'true', null])('never resets an existing admin value %j', async (admin) => {
+    getUser.mockResolvedValue({ privateMetadata: { admin } });
+    expect(await isUserAdmin('user_existing')).toBe(admin === true);
+    expect(updateUserMetadata).not.toHaveBeenCalled();
+  });
+
+  it('denies access if default initialization fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getUser.mockResolvedValue({ privateMetadata: {} });
+    updateUserMetadata.mockRejectedValueOnce(new Error('Unavailable'));
+    expect(await isUserAdmin('user_new')).toBe(false);
+    log.mockRestore();
+  });
 
   it('reads metadata again so revocation is not cached', async () => {
     getUser.mockResolvedValueOnce({ privateMetadata: { admin: true } })
