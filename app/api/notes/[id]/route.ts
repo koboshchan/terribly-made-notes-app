@@ -36,6 +36,8 @@ export async function GET(
       flashcards: note.flashcards || [],
       quizQuestions: note.quizQuestions || [],
       createdAt: note.createdAt,
+      updatedAt: note.updatedAt || note.createdAt,
+      recordedAt: note.recordedAt || note.createdAt,
       status: note.status,
       originalFileName: note.originalFileName,
       class: note.noteClass || null,
