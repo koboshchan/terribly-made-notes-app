@@ -1,20 +1,15 @@
-import { getCollection } from './db';
+import { clerkClient } from '@clerk/nextjs/server';
 
-// Owner identity comes from deployment configuration, never registration order.
-// Existing database roles must be explicitly re-approved before this rollout.
+// Clerk private metadata is the live source of truth, matching cal's admin check.
+// Never trust registration order, session claims, or cached Mongo admin flags.
 export async function isUserAdmin(userId: string): Promise<boolean> {
-  const ownerId = process.env.ADMIN_USER_ID?.trim();
-  if (!ownerId || ownerId !== userId) return false;
+  if (!userId) return false;
   try {
-    const users = await getCollection('users');
-    await users.createIndex({ userId: 1 }, { unique: true });
-    await users.updateOne({ userId }, {
-      $set: { isAdmin: true },
-      $setOnInsert: { registeredAt: new Date() },
-    }, { upsert: true });
-    return true;
+    const client = await clerkClient();
+    const user = await client.users.getUser(userId);
+    return user.privateMetadata?.admin === true;
   } catch (error) {
-    console.error('Error checking configured owner:', error);
+    console.error('Error checking Clerk admin metadata:', error);
     return false;
   }
 }

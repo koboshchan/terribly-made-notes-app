@@ -1,6 +1,6 @@
 Deployment and validation notes for this review branch
 
-Before deploying, set ADMIN_USER_ID to your Clerk user ID. Registration order no longer grants admin privileges, and existing database admin flags alone are not trusted. Resolve duplicate users.userId entries if the unique index fails.
+Before deploying, grant admins in the Clerk dashboard under user Metadata > Private by setting {"admin": true} (a JSON boolean, not a string). This matches cal: every server admin check reads clerkClient.users.getUser(userId) and requires privateMetadata.admin === true. Missing/false metadata and failed Clerk lookups deny access. Registration order, public metadata, session claims and existing Mongo admin flags are not trusted; no separate admin environment variable is needed.
 
 Set PROVIDER_BASE_URL_ALLOWLIST to a comma-separated list of exact approved STT/LLM base URLs, including each /v1 suffix. Model discovery and inference fail closed for URLs outside this list, and inference follows no redirects. Only explicitly allow trusted internal services. Set NEXT_PUBLIC_APP_URL to the canonical HTTPS origin used in share links. Keep all API keys in deployment configuration or owner-managed model settings, never source control.
 
