@@ -22,6 +22,7 @@ async function noSymlinks(file: string) {
   const resolved = path.resolve(file); let current = path.parse(resolved).root;
   for (const part of resolved.slice(current.length).split(path.sep)) {
     current = path.join(current, part);
+    if (process.platform === 'darwin' && (current === '/var' || current === '/tmp' || current === '/etc')) continue;
     try { if ((await lstat(current)).isSymbolicLink()) throw new Error('Symlink storage forbidden'); }
     catch (error: any) { if (error.code !== 'ENOENT') throw error; }
   }

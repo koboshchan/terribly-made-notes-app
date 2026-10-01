@@ -28,6 +28,7 @@ async function assertSafePath(file: string) {
   let current = path.parse(file).root;
   for (const part of file.slice(current.length).split(path.sep).filter(Boolean)) {
     current = path.join(current, part);
+    if (process.platform === 'darwin' && (current === '/var' || current === '/tmp' || current === '/etc')) continue;
     const entry = await lstat(current);
     if (entry.isSymbolicLink()) throw new Error(`Symlink forbidden: ${current}`);
   }

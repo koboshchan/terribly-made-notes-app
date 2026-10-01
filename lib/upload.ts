@@ -102,18 +102,44 @@ export async function acceptUpload(userId: string, upload: Awaited<ReturnType<ty
   finally { await rm(upload.tempDir, { recursive: true, force: true }); }
 }
 
+let indexesEnsured: Promise<void> | null = null;
+async function ensureUploadIndexes() {
+  if (!indexesEnsured) {
+    indexesEnsured = (async () => {
+      try {
+        const [locks, notes] = await Promise.all([getCollection('upload_admission'), getCollection('notes')]);
+        await Promise.all([
+          locks.createIndex({ key: 1 }, { unique: true }),
+          notes.createIndex({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } })
+        ]);
+      } catch (err) {
+        indexesEnsured = null;
+        console.error('Failed ensuring upload indexes:', err);
+      }
+    })();
+  }
+  await indexesEnsured;
+}
+
 async function acceptUploadLocked(userId: string, upload: Awaited<ReturnType<typeof parseUpload>>, source?: string, idempotencyKey?: string | null, runtime?: RuntimeSettings) {
   await ensureUserKey(userId);
   runtime ??= await getRuntimeSettings();
+  await ensureUploadIndexes();
   // Serialize concurrent-processing admission across replicas for the same user.
   const locks = await getCollection('upload_admission');
-  await locks.createIndex({ key: 1 }, { unique: true });
   const key = createHash('sha256').update(userId).digest('hex');
   const owner = randomUUID();
   try {
     await locks.updateOne({ key }, { $setOnInsert: { owner: null, leaseUntil: new Date(0) } }, { upsert: true });
   } catch (error: any) { if (error?.code !== 11000) throw error; }
-  const claim = await locks.updateOne({ key, leaseUntil: { $lte: new Date() } }, { $set: { owner, leaseUntil: new Date(Date.now() + 90000) } });
+  let claim = await locks.updateOne({ key, leaseUntil: { $lte: new Date() } }, { $set: { owner, leaseUntil: new Date(Date.now() + 90000) } });
+  if (!claim.modifiedCount) {
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      claim = await locks.updateOne({ key, leaseUntil: { $lte: new Date() } }, { $set: { owner, leaseUntil: new Date(Date.now() + 90000) } });
+      if (claim.modifiedCount) break;
+    }
+  }
   if (!claim.modifiedCount) throw new RequestError('Another upload is being admitted. Retry shortly.', 409);
   const heartbeat = setInterval(() => { void locks.updateOne({ key, owner }, { $set: { leaseUntil: new Date(Date.now() + 90000) } }).catch(console.error); }, 15000);
   try { return await admitUpload(userId, upload, runtime, source, idempotencyKey); }
@@ -127,7 +153,6 @@ async function admitUpload(userId: string, upload: Awaited<ReturnType<typeof par
   const notes = await getCollection('notes');
   if (idempotencyKey && !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey)) throw new RequestError('Invalid idempotency key');
   if (idempotencyKey) {
-    await notes.createIndex({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
     const existing = await notes.findOne({ userId, idempotencyKey });
     if (existing) return { noteId: existing._id.toString(), filename: upload.filename };
   }

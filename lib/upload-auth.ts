@@ -9,9 +9,17 @@ export async function uploadUserId(request: Request): Promise<string | null> {
   const expectedOrigin = origin ? new URL(origin).origin : new URL(request.url).origin;
   const requestOrigin = request.headers.get('origin');
   if (requestOrigin && requestOrigin !== expectedOrigin) return null;
+  const extraParties = (process.env.CLERK_AUTHORIZED_PARTIES || '')
+    .split(',')
+    .map(p => p.trim())
+    .filter(Boolean);
+  const authorizedParties = [
+    ...(origin ? [new URL(origin).origin] : []),
+    ...extraParties,
+  ];
   const state = await (await clerkClient()).authenticateRequest(request, {
     acceptsToken: 'session_token',
-    ...(origin ? { authorizedParties: [new URL(origin).origin] } : {}),
+    ...(authorizedParties.length > 0 ? { authorizedParties } : {}),
   });
   const userId = state.toAuth()?.userId || null;
   if (userId) await isUserAdmin(userId);
