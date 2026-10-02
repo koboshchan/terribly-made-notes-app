@@ -217,23 +217,20 @@ class ProcessingQueue {
       const globalSettingsCollection = await getCollection('global_settings');
       const globalSettings = await globalSettingsCollection.findOne({ type: 'models' });
       if (globalSettings?.settings?.pipeline) {
+        const getStageConfig = (stage: PipelineStage) => {
+          const s = globalSettings.settings.pipeline[stage];
+          const def = defaultPipelineSettings[stage];
+          const concurrency = s?.concurrency !== undefined ? s.concurrency : (s?.parallel === false ? 1 : (def.parallel ? 2 : 1));
+          return {
+            parallel: concurrency === -1 || concurrency > 1,
+            concurrency,
+          };
+        };
         this.cachedPipelineSettings = {
-          audioNormalization: {
-            parallel: globalSettings.settings.pipeline.audioNormalization?.parallel ?? defaultPipelineSettings.audioNormalization.parallel,
-            concurrency: globalSettings.settings.pipeline.audioNormalization?.concurrency,
-          },
-          transcription: {
-            parallel: globalSettings.settings.pipeline.transcription?.parallel ?? defaultPipelineSettings.transcription.parallel,
-            concurrency: globalSettings.settings.pipeline.transcription?.concurrency,
-          },
-          summarization: {
-            parallel: globalSettings.settings.pipeline.summarization?.parallel ?? defaultPipelineSettings.summarization.parallel,
-            concurrency: globalSettings.settings.pipeline.summarization?.concurrency,
-          },
-          generation: {
-            parallel: globalSettings.settings.pipeline.generation?.parallel ?? defaultPipelineSettings.generation.parallel,
-            concurrency: globalSettings.settings.pipeline.generation?.concurrency,
-          },
+          audioNormalization: getStageConfig('audioNormalization'),
+          transcription: getStageConfig('transcription'),
+          summarization: getStageConfig('summarization'),
+          generation: getStageConfig('generation'),
         };
       }
       this.lastSettingsFetch = now;
@@ -291,35 +288,28 @@ class ProcessingQueue {
         const pipelineSettings = await this.getPipelineSettings();
 
         for (const stage of PIPELINE_STAGES) {
-          const isParallel = pipelineSettings[stage]?.parallel ?? defaultPipelineSettings[stage].parallel;
+          const config = pipelineSettings[stage];
+          const concurrency = config?.concurrency !== undefined
+            ? config.concurrency
+            : (config?.parallel === false ? 1 : (Number(process.env[`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`]) || 2));
           const activeItems = this.queue.filter(q => q.currentStage === stage && q.stageStatus === 'active');
           const waitingItems = this.queue.filter(q => q.currentStage === stage && q.stageStatus === 'waiting');
 
-          if (!isParallel) {
-            // Sequential mode: exactly 1 item can be active at a time for this stage
-            if (activeItems.length === 0 && waitingItems.length > 0) {
-              waitingItems.sort((a, b) => a.addedAt - b.addedAt);
-              const itemToProcess = waitingItems[0];
-              itemToProcess.stageStatus = 'active';
-              itemToProcess.status = 'processing';
-              this.executeStage(itemToProcess, stage).catch(err => {
-                console.error(`Error in stage '${stage}' for item ${itemToProcess.id}:`, err);
+          // If concurrency is -1, all waiting items are admitted (infinite concurrency).
+          // Otherwise, availableSlots is max(0, concurrency - activeItems.length).
+          const availableSlots = concurrency === -1
+            ? waitingItems.length
+            : Math.max(0, concurrency - activeItems.length);
+
+          if (availableSlots > 0 && waitingItems.length > 0) {
+            waitingItems.sort((a, b) => a.addedAt - b.addedAt);
+            const itemsToProcess = waitingItems.slice(0, availableSlots);
+            for (const item of itemsToProcess) {
+              item.stageStatus = 'active';
+              item.status = 'processing';
+              this.executeStage(item, stage).catch(err => {
+                console.error(`Error in stage '${stage}' for item ${item.id}:`, err);
               });
-            }
-          } else {
-            // Parallel mode: all waiting items run concurrently (up to safety limit)
-            const MAX_CONCURRENT = Math.max(1, Math.min(10, pipelineSettings[stage].concurrency ?? (Number(process.env[`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`]) || 2)));
-            const availableSlots = Math.max(0, MAX_CONCURRENT - activeItems.length);
-            if (availableSlots > 0 && waitingItems.length > 0) {
-              waitingItems.sort((a, b) => a.addedAt - b.addedAt);
-              const itemsToProcess = waitingItems.slice(0, availableSlots);
-              for (const item of itemsToProcess) {
-                item.stageStatus = 'active';
-                item.status = 'processing';
-                this.executeStage(item, stage).catch(err => {
-                  console.error(`Error in stage '${stage}' for item ${item.id}:`, err);
-                });
-              }
             }
           }
         }

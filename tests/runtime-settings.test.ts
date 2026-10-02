@@ -54,6 +54,10 @@ describe('admin runtime policy', () => {
   });
   it('validates stage concurrency', () => {
     expect(() => validatePipeline({ generation: { parallel: true, concurrency: 10 } })).not.toThrow();
+    expect(() => validatePipeline({ generation: { concurrency: -1 } })).not.toThrow();
+    expect(() => validatePipeline({ generation: { concurrency: 1 } })).not.toThrow();
+    expect(() => validatePipeline({ generation: { concurrency: 0 } })).toThrow();
+    expect(() => validatePipeline({ generation: { concurrency: -2 } })).toThrow();
     expect(() => validatePipeline({ generation: { parallel: true, concurrency: 11 } })).toThrow();
     expect(() => validatePipeline({ generation: { parallel: 'yes' } })).toThrow();
   });

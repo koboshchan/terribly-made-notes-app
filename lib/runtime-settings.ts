@@ -71,9 +71,13 @@ export function validateCapabilities(value: any) {
 }
 export function normalizedPipeline(value: any, defaults: any) {
   return Object.fromEntries(Object.keys(defaults).map(stage => {
-    const config = { ...defaults[stage], ...(value?.[stage] || {}) };
-    config.concurrency = config.concurrency ?? envNumber(`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`, 1, 10, 2);
-    return [stage, config];
+    const raw = value?.[stage] || {};
+    const def = defaults[stage] || {};
+    const concurrency = raw.concurrency !== undefined
+      ? raw.concurrency
+      : envNumber(`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`, 1, 10, raw.parallel === false ? 1 : 2);
+    const parallel = raw.parallel !== undefined ? raw.parallel : (concurrency === -1 || concurrency > 1);
+    return [stage, { ...def, ...raw, parallel, concurrency }];
   }));
 }
 export function validatePipeline(value: any) {
@@ -83,7 +87,12 @@ export function validatePipeline(value: any) {
   for (const [key, stage] of Object.entries(value)) {
     if (!stages.includes(key) || !stage || typeof stage !== 'object' || Array.isArray(stage)) throw new RequestError('Invalid pipeline stage');
     const s = stage as any;
-    if (typeof s.parallel !== 'boolean' || (s.concurrency !== undefined && (!Number.isInteger(s.concurrency) || s.concurrency < 1 || s.concurrency > 10))) throw new RequestError('Pipeline parallel must be boolean and concurrency 1 to 10');
+    if (s.parallel !== undefined && typeof s.parallel !== 'boolean') throw new RequestError('Pipeline parallel must be boolean');
+    if (s.concurrency !== undefined) {
+      if (!Number.isInteger(s.concurrency) || (s.concurrency !== -1 && (s.concurrency < 1 || s.concurrency > 10))) {
+        throw new RequestError('Pipeline concurrency must be 1 to 10, or -1 for infinite');
+      }
+    }
     if (Object.keys(s).some(k => !['parallel', 'concurrency'].includes(k))) throw new RequestError('Unknown pipeline setting');
   }
 }

@@ -276,7 +276,17 @@ export default function AdminModelsPage() {
   const updateCapability = (patch: Partial<SttCapabilities>) =>
     setSettings(prev => ({ ...prev, stt: { ...prev.stt, capabilities: { ...capabilityDefaults(), ...prev.stt.capabilities, ...patch } } }));
   const updateConcurrency = (stage: keyof ModelSettings['pipeline'], value: number) =>
-    setSettings(prev => ({ ...prev, pipeline: { ...prev.pipeline, [stage]: { ...prev.pipeline[stage], concurrency: value } } }));
+    setSettings(prev => ({
+      ...prev,
+      pipeline: {
+        ...prev.pipeline,
+        [stage]: {
+          ...prev.pipeline[stage],
+          concurrency: value,
+          parallel: value === -1 || value > 1,
+        },
+      },
+    }));
   const numberField = (id: string, label: string, min: number, max: number, value: number, onChange: (n: number) => void) => (
     <div className="form-group" key={id}>
       <label className="form-label" htmlFor={id}>{label}</label>
@@ -285,19 +295,6 @@ export default function AdminModelsPage() {
       <small style={{ color: '#94a3b8' }}>Allowed {min.toLocaleString()} to {max.toLocaleString()}</small>
     </div>
   );
-
-  const updatePipelineSetting = (stage: keyof ModelSettings['pipeline'], parallel: boolean) => {
-    setSettings(prev => ({
-      ...prev,
-      pipeline: {
-        ...prev.pipeline,
-        [stage]: {
-          ...prev.pipeline[stage],
-          parallel,
-        },
-      },
-    }));
-  };
 
   // Helper function to safely get nested STT settings
   const getSafeSTTSettings = () => ({
@@ -313,7 +310,27 @@ export default function AdminModelsPage() {
     description: string,
     behaviorNote: string
   ) => {
-    const isParallel = settings.pipeline?.[key]?.parallel ?? true;
+    const stage = settings.pipeline?.[key];
+    const concurrency = stage?.concurrency ?? (stage?.parallel === false ? 1 : 2);
+    const isInfinite = concurrency === -1;
+    const isSequential = concurrency === 1;
+
+    let badgeText = `⚡ Parallel (${concurrency} at once)`;
+    let badgeBg = '#dbeafe';
+    let badgeColor = '#1d4ed8';
+    let badgeBorder = '#93c5fd';
+
+    if (isInfinite) {
+      badgeText = '⚡ Infinite (All at once)';
+      badgeBg = '#dcfce7';
+      badgeColor = '#15803d';
+      badgeBorder = '#86efac';
+    } else if (isSequential) {
+      badgeText = '⏳ Sequential (1 at a time queue)';
+      badgeBg = '#fef3c7';
+      badgeColor = '#92400e';
+      badgeBorder = '#fde68a';
+    }
 
     return (
       <div
@@ -343,15 +360,15 @@ export default function AdminModelsPage() {
                 fontWeight: '600',
                 padding: '2px 10px',
                 borderRadius: '9999px',
-                backgroundColor: isParallel ? '#dcfce7' : '#fef3c7',
-                color: isParallel ? '#15803d' : '#92400e',
-                border: `1px solid ${isParallel ? '#86efac' : '#fde68a'}`,
+                backgroundColor: badgeBg,
+                color: badgeColor,
+                border: `1px solid ${badgeBorder}`,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '4px',
               }}
             >
-              {isParallel ? '⚡ Parallel (All at once)' : '⏳ Sequential (1 at a time queue)'}
+              {badgeText}
             </span>
           </div>
           <p style={{ fontSize: '0.875rem', color: '#475569', margin: '0 0 4px 0', paddingLeft: '32px' }}>
@@ -360,63 +377,28 @@ export default function AdminModelsPage() {
           <p style={{ fontSize: '0.785rem', color: '#94a3b8', margin: 0, paddingLeft: '32px' }}>
             {behaviorNote}
           </p>
-          {isParallel && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '32px', marginTop: '8px', fontSize: '0.85rem', color: '#475569' }}>
-              Max concurrent per process
-              <input type="number" min={1} max={10} step={1} className="form-input" style={{ width: '80px' }}
-                value={settings.pipeline?.[key]?.concurrency ?? 1}
-                onChange={(e) => { const n = Math.trunc(Number(e.target.value)); if (Number.isFinite(n)) updateConcurrency(key, n); }} />
-              <small style={{ color: '#94a3b8' }}>1 to 10</small>
-            </label>
-          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span
-            style={{
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              color: isParallel ? '#16a34a' : '#64748b',
-              minWidth: '90px',
-              textAlign: 'right',
-            }}
-          >
-            {isParallel ? 'Parallel ON' : 'Parallel OFF'}
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isParallel}
-            aria-label={`Toggle parallel processing for Step ${stepNumber}: ${title}`}
-            onClick={() => updatePipelineSetting(key, !isParallel)}
-            style={{
-              position: 'relative',
-              width: '52px',
-              height: '28px',
-              backgroundColor: isParallel ? '#2563eb' : '#cbd5e1',
-              borderRadius: '9999px',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s',
-              padding: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                top: '3px',
-                left: isParallel ? '26px' : '4px',
-                width: '22px',
-                height: '22px',
-                backgroundColor: '#ffffff',
-                borderRadius: '50%',
-                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
-                transition: 'left 0.2s',
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.875rem', fontWeight: 500, color: '#334155' }}>
+            <span>Max concurrent:</span>
+            <input
+              type="number"
+              min={-1}
+              max={10}
+              step={1}
+              className="form-input"
+              style={{ width: '80px', textAlign: 'center', fontWeight: 'bold' }}
+              value={concurrency}
+              onChange={(e) => {
+                const n = Math.trunc(Number(e.target.value));
+                if (Number.isFinite(n)) updateConcurrency(key, n);
               }}
             />
-          </button>
+          </label>
+          <small style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+            1 to 10, or -1 for infinite
+          </small>
         </div>
       </div>
     );
@@ -469,7 +451,7 @@ export default function AdminModelsPage() {
               <span>⚡</span> Note Processing Pipeline & Concurrency
             </h3>
             <p style={{ color: '#64748b', fontSize: '0.925rem', marginTop: '4px' }}>
-              Control whether each stage of the note processing pipeline runs in parallel (multiple notes processed concurrently) or sequentially (queued, 1 note at a time).
+              Control concurrency for each stage of the processing pipeline. Enter 1 for sequential queue, a positive number for max concurrent notes, or -1 for infinite (all at once).
             </p>
           </div>
 
@@ -480,7 +462,7 @@ export default function AdminModelsPage() {
               'Audio Normalization (FFmpeg)',
               '🎵',
               'Converts uploaded audio files into standardized MP3 (128 kbps, 44.1 kHz).',
-              'When ON, all incoming notes convert audio simultaneously. When OFF, audio conversion runs one note at a time.'
+              'Set -1 to convert all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -489,7 +471,7 @@ export default function AdminModelsPage() {
               'Speech-to-Text Transcription (STT)',
               '🎙️',
               'Transcribes normalized MP3 audio into verbatim text via the configured STT model.',
-              'When ON, multiple transcriptions run simultaneously. When OFF, notes queue up and transcribe one by one to respect API rate limits.'
+              'Set -1 to transcribe all notes simultaneously, 1 for sequential queue (recommended for API rate limits), or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -498,7 +480,7 @@ export default function AdminModelsPage() {
               'AI Summarization & Classification',
               '📝',
               'Generates structured Markdown study notes and assigns subject classes using LLM.',
-              'When ON, summarization runs concurrently for all transcribed notes. When OFF, notes summarize one at a time.'
+              'Set -1 to summarize all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -507,7 +489,7 @@ export default function AdminModelsPage() {
               'Study Materials Generation (Flashcards & Quiz)',
               '🎴',
               'Generates question/answer flashcards and interactive multiple-choice quiz questions.',
-              'When ON, study materials generate concurrently for all summarized notes. When OFF, generation runs sequentially.'
+              'Set -1 to generate all study materials simultaneously, 1 for sequential generation, or 2 to 10.'
             )}
           </div>
         </section>
