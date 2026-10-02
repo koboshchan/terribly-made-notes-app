@@ -42,7 +42,8 @@ export default function PrivacyPage() {
 
       <h2>Retention and deletion</h2>
       <p>
-        Your data is destroyed fully upon account deletion, and can be requested to be deleted via email at{" "}
+        Your data is kept for up to 30 days after account deletion, then destroyed fully. Deletion can also be
+        requested at any time via email at{" "}
         <a href="mailto:lz@kjt.lol">lz@kjt.lol</a>.
       </p>
 

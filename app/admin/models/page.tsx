@@ -240,11 +240,17 @@ export default function AdminModelsPage() {
       if (response.ok) {
         showNotification('API settings saved successfully!');
       } else {
-        throw new Error('Failed to save settings');
+        let msg = 'Failed to save settings';
+        try {
+          const body = await response.json();
+          if (body?.error) msg = body.error;
+        } catch { /* ignore */ }
+        throw new Error(msg);
       }
     } catch (error) {
       console.error('Failed to save settings:', error);
-      showNotification('Failed to save settings. Please try again.', true);
+      const msg = error instanceof Error ? error.message : 'Failed to save settings. Please try again.';
+      showNotification(msg, true);
     } finally {
       setSaving(false);
     }
@@ -392,7 +398,7 @@ export default function AdminModelsPage() {
               value={concurrency}
               onChange={(e) => {
                 const n = Math.trunc(Number(e.target.value));
-                if (Number.isFinite(n)) updateConcurrency(key, n);
+                if (n === -1 || (Number.isInteger(n) && n >= 1 && n <= 10)) updateConcurrency(key, n);
               }}
             />
           </label>
