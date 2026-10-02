@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCollection } from '@/lib/db';
+import { activeShareFilter } from '@/lib/share';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +13,7 @@ export async function GET(
     const note = await notesCollection.findOne({
       shareToken: token,
       shareEnabled: true,
+      ...activeShareFilter(),
       status: 'completed',
     });
 
@@ -24,6 +26,7 @@ export async function GET(
       description: note.description,
       content: note.content,
       createdAt: note.createdAt,
+      shareAllowChat: note.shareAllowChat === true,
     });
   } catch (error) {
     console.error('Failed to fetch shared note:', error);

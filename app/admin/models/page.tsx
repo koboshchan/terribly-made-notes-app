@@ -4,10 +4,36 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 
+// Mirrors lib/runtime-settings.ts (server-only; imports db). Keep in sync.
+const RUNTIME_FIELDS = [
+  { key: 'chatTokenPerMinute', label: 'Public chat requests per share link per minute', min: 1, max: 10000, def: 10 },
+  { key: 'chatClientPerMinute', label: 'Public chat requests per client per minute', min: 1, max: 10000, def: 20 },
+  { key: 'chatOwnerPerDay', label: 'Public chat requests per note owner per day', min: 1, max: 1000000, def: 100 },
+  { key: 'audioMaxSeconds', label: 'Maximum audio length (seconds, 36000 = 10 hours)', min: 1, max: 86400, def: 36000 },
+  { key: 'maxProcessingNotes', label: 'Maximum notes processing at once per user', min: 1, max: 1000, def: 5 },
+  { key: 'providerTimeoutMs', label: 'AI provider request timeout (ms)', min: 1000, max: 3600000, def: 300000 },
+  { key: 'mediaTimeoutSeconds', label: 'FFmpeg/media processing timeout (seconds)', min: 1, max: 3600, def: 600 },
+  { key: 'summaryMaxTokens', label: 'Summary max output tokens', min: 256, max: 128000, def: 6000 },
+  { key: 'contextChars', label: 'Chat context size (characters)', min: 4000, max: 2000000, def: 48000 },
+] as const;
+type RuntimeSettings = { [K in typeof RUNTIME_FIELDS[number]['key']]: number };
+const runtimeDefaults = () => Object.fromEntries(RUNTIME_FIELDS.map(f => [f.key, f.def])) as RuntimeSettings;
+const CAPABILITY_FIELDS = [
+  { key: 'maxBytes', label: 'Max bytes per chunk', min: 1024, max: 268435456, def: 20971520 },
+  { key: 'chunkSeconds', label: 'Chunk length (seconds)', min: 2, max: 3600, def: 300 },
+  { key: 'overlapSeconds', label: 'Chunk overlap (seconds)', min: 0, max: 60, def: 2 },
+  { key: 'sampleRate', label: 'Chunk sample rate (Hz)', min: 8000, max: 192000, def: 16000 },
+  { key: 'channels', label: 'Chunk channels', min: 1, max: 2, def: 1 },
+] as const;
+interface SttCapabilities { chunkingEnabled: boolean; maxBytes: number; chunkSeconds: number; overlapSeconds: number; format: 'mp3' | 'wav'; sampleRate: number; channels: number }
+const capabilityDefaults = (): SttCapabilities => ({ chunkingEnabled: false, format: 'mp3', ...Object.fromEntries(CAPABILITY_FIELDS.map(f => [f.key, f.def])) } as SttCapabilities);
+type PipelineStage = { parallel: boolean; concurrency?: number };
+
 interface ModelSettings {
   stt: {
     baseUrl: string;
     apiKey: string;
+    capabilities: SttCapabilities;
     english: {
       modelName: string;
       task: 'transcribe' | 'translate';
@@ -36,19 +62,13 @@ interface ModelSettings {
     sampleRate: number;
   };
   pipeline: {
-    audioNormalization: {
-      parallel: boolean;
-    };
-    transcription: {
-      parallel: boolean;
-    };
-    summarization: {
-      parallel: boolean;
-    };
-    generation: {
-      parallel: boolean;
-    };
+    audioNormalization: PipelineStage;
+    transcription: PipelineStage;
+    summarization: PipelineStage;
+    generation: PipelineStage;
   };
+  shareExpiryDays: number | null;
+  runtime: RuntimeSettings;
 }
 
 export default function AdminModelsPage() {
@@ -56,6 +76,7 @@ export default function AdminModelsPage() {
   const router = useRouter();
   const [settings, setSettings] = useState<ModelSettings>({
     stt: {
+      capabilities: capabilityDefaults(),
       baseUrl: 'https://api.openai.com/v1',
       apiKey: '',
       english: {
@@ -91,6 +112,8 @@ export default function AdminModelsPage() {
       summarization: { parallel: true },
       generation: { parallel: true },
     },
+    shareExpiryDays: 30,
+    runtime: runtimeDefaults(),
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -149,11 +172,17 @@ export default function AdminModelsPage() {
           };
         } else {
           data.pipeline = {
-            audioNormalization: { parallel: data.pipeline.audioNormalization?.parallel ?? true },
-            transcription: { parallel: data.pipeline.transcription?.parallel ?? false },
-            summarization: { parallel: data.pipeline.summarization?.parallel ?? true },
-            generation: { parallel: data.pipeline.generation?.parallel ?? true },
+            audioNormalization: { ...data.pipeline.audioNormalization, parallel: data.pipeline.audioNormalization?.parallel ?? true },
+            transcription: { ...data.pipeline.transcription, parallel: data.pipeline.transcription?.parallel ?? false },
+            summarization: { ...data.pipeline.summarization, parallel: data.pipeline.summarization?.parallel ?? true },
+            generation: { ...data.pipeline.generation, parallel: data.pipeline.generation?.parallel ?? true },
           };
+        }
+
+        data.runtime = { ...runtimeDefaults(), ...(data.runtime || {}) };
+        if (data.stt) data.stt.capabilities = { ...capabilityDefaults(), ...(data.stt.capabilities || {}) };
+        if (data.shareExpiryDays === undefined) {
+          data.shareExpiryDays = 30;
         }
 
         setSettings(data);
@@ -211,11 +240,17 @@ export default function AdminModelsPage() {
       if (response.ok) {
         showNotification('API settings saved successfully!');
       } else {
-        throw new Error('Failed to save settings');
+        let msg = 'Failed to save settings';
+        try {
+          const body = await response.json();
+          if (body?.error) msg = body.error;
+        } catch { /* ignore */ }
+        throw new Error(msg);
       }
     } catch (error) {
       console.error('Failed to save settings:', error);
-      showNotification('Failed to save settings. Please try again.', true);
+      const msg = error instanceof Error ? error.message : 'Failed to save settings. Please try again.';
+      showNotification(msg, true);
     } finally {
       setSaving(false);
     }
@@ -232,7 +267,7 @@ export default function AdminModelsPage() {
     }, 3000);
   };
 
-  const updateSettings = (section: keyof ModelSettings, field: string, value: any) => {
+  const updateSettings = (section: Exclude<keyof ModelSettings, 'shareExpiryDays' | 'runtime'>, field: string, value: any) => {
     setSettings(prev => ({
       ...prev,
       [section]: {
@@ -242,17 +277,30 @@ export default function AdminModelsPage() {
     }));
   };
 
-  const updatePipelineSetting = (stage: keyof ModelSettings['pipeline'], parallel: boolean) => {
+  const updateRuntime = (key: keyof RuntimeSettings, value: number) =>
+    setSettings(prev => ({ ...prev, runtime: { ...prev.runtime, [key]: value } }));
+  const updateCapability = (patch: Partial<SttCapabilities>) =>
+    setSettings(prev => ({ ...prev, stt: { ...prev.stt, capabilities: { ...capabilityDefaults(), ...prev.stt.capabilities, ...patch } } }));
+  const updateConcurrency = (stage: keyof ModelSettings['pipeline'], value: number) =>
     setSettings(prev => ({
       ...prev,
       pipeline: {
         ...prev.pipeline,
         [stage]: {
-          parallel,
+          ...prev.pipeline[stage],
+          concurrency: value,
+          parallel: value === -1 || value > 1,
         },
       },
     }));
-  };
+  const numberField = (id: string, label: string, min: number, max: number, value: number, onChange: (n: number) => void) => (
+    <div className="form-group" key={id}>
+      <label className="form-label" htmlFor={id}>{label}</label>
+      <input id={id} type="number" className="form-input" min={min} max={max} step={1} value={value}
+        onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onChange(Math.trunc(n)); }} />
+      <small style={{ color: '#94a3b8' }}>Allowed {min.toLocaleString()} to {max.toLocaleString()}</small>
+    </div>
+  );
 
   // Helper function to safely get nested STT settings
   const getSafeSTTSettings = () => ({
@@ -268,7 +316,27 @@ export default function AdminModelsPage() {
     description: string,
     behaviorNote: string
   ) => {
-    const isParallel = settings.pipeline?.[key]?.parallel ?? true;
+    const stage = settings.pipeline?.[key];
+    const concurrency = stage?.concurrency ?? (stage?.parallel === false ? 1 : 2);
+    const isInfinite = concurrency === -1;
+    const isSequential = concurrency === 1;
+
+    let badgeText = `⚡ Parallel (${concurrency} at once)`;
+    let badgeBg = '#dbeafe';
+    let badgeColor = '#1d4ed8';
+    let badgeBorder = '#93c5fd';
+
+    if (isInfinite) {
+      badgeText = '⚡ Infinite (All at once)';
+      badgeBg = '#dcfce7';
+      badgeColor = '#15803d';
+      badgeBorder = '#86efac';
+    } else if (isSequential) {
+      badgeText = '⏳ Sequential (1 at a time queue)';
+      badgeBg = '#fef3c7';
+      badgeColor = '#92400e';
+      badgeBorder = '#fde68a';
+    }
 
     return (
       <div
@@ -298,15 +366,15 @@ export default function AdminModelsPage() {
                 fontWeight: '600',
                 padding: '2px 10px',
                 borderRadius: '9999px',
-                backgroundColor: isParallel ? '#dcfce7' : '#fef3c7',
-                color: isParallel ? '#15803d' : '#92400e',
-                border: `1px solid ${isParallel ? '#86efac' : '#fde68a'}`,
+                backgroundColor: badgeBg,
+                color: badgeColor,
+                border: `1px solid ${badgeBorder}`,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '4px',
               }}
             >
-              {isParallel ? '⚡ Parallel (All at once)' : '⏳ Sequential (1 at a time queue)'}
+              {badgeText}
             </span>
           </div>
           <p style={{ fontSize: '0.875rem', color: '#475569', margin: '0 0 4px 0', paddingLeft: '32px' }}>
@@ -317,52 +385,26 @@ export default function AdminModelsPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span
-            style={{
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              color: isParallel ? '#16a34a' : '#64748b',
-              minWidth: '90px',
-              textAlign: 'right',
-            }}
-          >
-            {isParallel ? 'Parallel ON' : 'Parallel OFF'}
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isParallel}
-            aria-label={`Toggle parallel processing for Step ${stepNumber}: ${title}`}
-            onClick={() => updatePipelineSetting(key, !isParallel)}
-            style={{
-              position: 'relative',
-              width: '52px',
-              height: '28px',
-              backgroundColor: isParallel ? '#2563eb' : '#cbd5e1',
-              borderRadius: '9999px',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s',
-              padding: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                top: '3px',
-                left: isParallel ? '26px' : '4px',
-                width: '22px',
-                height: '22px',
-                backgroundColor: '#ffffff',
-                borderRadius: '50%',
-                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
-                transition: 'left 0.2s',
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.875rem', fontWeight: 500, color: '#334155' }}>
+            <span>Max concurrent:</span>
+            <input
+              type="number"
+              min={-1}
+              max={10}
+              step={1}
+              className="form-input"
+              style={{ width: '80px', textAlign: 'center', fontWeight: 'bold' }}
+              value={concurrency}
+              onChange={(e) => {
+                const n = Math.trunc(Number(e.target.value));
+                if (n === -1 || (Number.isInteger(n) && n >= 1 && n <= 10)) updateConcurrency(key, n);
               }}
             />
-          </button>
+          </label>
+          <small style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+            1 to 10, or -1 for infinite
+          </small>
         </div>
       </div>
     );
@@ -415,7 +457,7 @@ export default function AdminModelsPage() {
               <span>⚡</span> Note Processing Pipeline & Concurrency
             </h3>
             <p style={{ color: '#64748b', fontSize: '0.925rem', marginTop: '4px' }}>
-              Control whether each stage of the note processing pipeline runs in parallel (multiple notes processed concurrently) or sequentially (queued, 1 note at a time).
+              Control concurrency for each stage of the processing pipeline. Enter 1 for sequential queue, a positive number for max concurrent notes, or -1 for infinite (all at once).
             </p>
           </div>
 
@@ -426,7 +468,7 @@ export default function AdminModelsPage() {
               'Audio Normalization (FFmpeg)',
               '🎵',
               'Converts uploaded audio files into standardized MP3 (128 kbps, 44.1 kHz).',
-              'When ON, all incoming notes convert audio simultaneously. When OFF, audio conversion runs one note at a time.'
+              'Set -1 to convert all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -435,7 +477,7 @@ export default function AdminModelsPage() {
               'Speech-to-Text Transcription (STT)',
               '🎙️',
               'Transcribes normalized MP3 audio into verbatim text via the configured STT model.',
-              'When ON, multiple transcriptions run simultaneously. When OFF, notes queue up and transcribe one by one to respect API rate limits.'
+              'Set -1 to transcribe all notes simultaneously, 1 for sequential queue (recommended for API rate limits), or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -444,7 +486,7 @@ export default function AdminModelsPage() {
               'AI Summarization & Classification',
               '📝',
               'Generates structured Markdown study notes and assigns subject classes using LLM.',
-              'When ON, summarization runs concurrently for all transcribed notes. When OFF, notes summarize one at a time.'
+              'Set -1 to summarize all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -453,9 +495,42 @@ export default function AdminModelsPage() {
               'Study Materials Generation (Flashcards & Quiz)',
               '🎴',
               'Generates question/answer flashcards and interactive multiple-choice quiz questions.',
-              'When ON, study materials generate concurrently for all summarized notes. When OFF, generation runs sequentially.'
+              'Set -1 to generate all study materials simultaneously, 1 for sequential generation, or 2 to 10.'
             )}
           </div>
+        </section>
+
+        {/* Runtime limits */}
+        <section style={{ marginBottom: '45px', borderBottom: '2px solid #f1f5f9', paddingBottom: '35px' }}>
+          <h3 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '8px' }}>Runtime Limits</h3>
+          <p style={{ color: '#64748b', fontSize: '0.925rem', marginBottom: '20px' }}>
+            Saved values override environment defaults. There is no per-file upload size cap or upload/storage quota.
+          </p>
+          {RUNTIME_FIELDS.map(f => numberField(`runtime-${f.key}`, f.label, f.min, f.max, settings.runtime?.[f.key] ?? f.def, n => updateRuntime(f.key, n)))}
+
+          <h4 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '24px 0 8px' }}>STT Chunking</h4>
+          <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '12px' }}>
+            Off by default: the whole normalized MP3 (128 kbps, 44.1 kHz stereo) is sent in one request. Your STT provider may impose its own file size limit; enable chunking if it rejects long recordings.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <input type="checkbox" checked={settings.stt.capabilities?.chunkingEnabled ?? false}
+              onChange={(e) => updateCapability({ chunkingEnabled: e.target.checked })} />
+            Split audio into chunks before transcription
+          </label>
+          {settings.stt.capabilities?.chunkingEnabled && (
+            <>
+              <div className="form-group">
+                <label className="form-label" htmlFor="stt-chunk-format">Chunk format</label>
+                <select id="stt-chunk-format" className="form-input" value={settings.stt.capabilities.format}
+                  onChange={(e) => updateCapability({ format: e.target.value as 'mp3' | 'wav' })}>
+                  <option value="mp3">MP3</option>
+                  <option value="wav">WAV</option>
+                </select>
+              </div>
+              {CAPABILITY_FIELDS.map(f => numberField(`stt-${f.key}`, f.label, f.min, f.max, settings.stt.capabilities?.[f.key] ?? f.def, n => updateCapability({ [f.key]: n })))}
+              <small style={{ color: '#94a3b8' }}>Overlap must be less than half the chunk length.</small>
+            </>
+          )}
         </section>
 
         {/* STT Settings */}
@@ -788,6 +863,44 @@ export default function AdminModelsPage() {
               onChange={(e) => updateSettings('tts', 'sampleRate', parseInt(e.target.value))}
             />
           </div>
+        </section>
+
+        <section style={{ marginBottom: '40px' }}>
+          <h3 style={{ marginBottom: '8px' }}>Share Links</h3>
+          <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '16px' }}>
+            Expiry applies when a share is created or updated. Existing shares keep their current expiry.
+          </p>
+          <div className="form-group">
+            <label className="form-label" htmlFor="share-expiry-never">
+              <input
+                id="share-expiry-never"
+                type="checkbox"
+                checked={settings.shareExpiryDays === null}
+                onChange={(e) => setSettings(prev => ({ ...prev, shareExpiryDays: e.target.checked ? null : 30 }))}
+                style={{ marginRight: '8px' }}
+              />
+              Never expire
+            </label>
+          </div>
+          {settings.shareExpiryDays !== null && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="share-expiry-days">Expire after (days, 1-365)</label>
+              <input
+                id="share-expiry-days"
+                type="number"
+                min="1"
+                max="365"
+                step="1"
+                className="form-input"
+                value={settings.shareExpiryDays}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  const days = Number.isNaN(n) ? 1 : Math.min(365, Math.max(1, n));
+                  setSettings(prev => ({ ...prev, shareExpiryDays: days }));
+                }}
+              />
+            </div>
+          )}
         </section>
 
         <div style={{ textAlign: 'center' }}>

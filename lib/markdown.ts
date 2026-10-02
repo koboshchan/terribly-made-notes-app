@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
+import DOMPurify from 'isomorphic-dompurify';
 
 let markdownConfigured = false;
 let mhchemLoadStarted = false;
@@ -56,7 +57,44 @@ export async function setupMarkdownRenderer() {
   }
 }
 
+// http(s), mailto, or scheme-less (relative) URLs only.
+const SAFE_URL = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+let hooksInstalled = false;
+
+function installHooks() {
+  if (hooksInstalled) return;
+  hooksInstalled = true;
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href');
+      if (href !== null && !SAFE_URL.test(href.trim())) {
+        node.removeAttribute('href');
+      }
+      if (node.getAttribute('href')?.match(/^https?:/i)) {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer nofollow');
+      }
+    }
+  });
+}
+
+/**
+ * Sanitize rendered HTML. Allows standard HTML plus KaTeX output
+ * (HTML spans with inline styles and MathML), strips scripts, event
+ * handlers, forms, embeds and any non http(s)/mailto/relative URLs.
+ */
+export function sanitizeHtml(html: string): string {
+  installHooks();
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, mathMl: true },
+    ADD_ATTR: ['target', 'aria-hidden', 'encoding'],
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'svg'],
+    FORBID_ATTR: ['srcset', 'formaction', 'xlink:href', 'action'],
+    ALLOWED_URI_REGEXP: SAFE_URL,
+  });
+}
+
 export function renderMarkdown(markdown: string): string {
   const normalized = normalizeMathInMarkdown(markdown);
-  return marked(normalized) as string;
+  return sanitizeHtml(marked(normalized) as string);
 }

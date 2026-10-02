@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { BulkShareManager } from "@/app/components/ShareControls";
 
 interface UserClass {
   _id: string;
@@ -14,10 +15,24 @@ interface ShortcutToken {
   _id: string;
   name: string;
   description: string;
-  token: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+  scopes?: string[];
   createdAt: string;
   lastUsed: string | null;
   isActive: boolean;
+}
+
+function clampExpiry(days: number): number {
+  if (!Number.isFinite(days)) return 90;
+  return Math.min(365, Math.max(1, Math.round(days)));
+}
+
+function formatTokenExpiry(expiresAt: string | null): string {
+  if (!expiresAt) return 'No expiry set';
+  const d = new Date(expiresAt);
+  if (Number.isNaN(d.getTime())) return 'No expiry set';
+  return d.getTime() < Date.now() ? `Expired ${d.toLocaleDateString()}` : `Expires ${d.toLocaleDateString()}`;
 }
 
 export default function UserSettings() {
@@ -35,7 +50,10 @@ export default function UserSettings() {
   const [newTokenName, setNewTokenName] = useState('');
   const [newTokenDescription, setNewTokenDescription] = useState('');
   const [creatingToken, setCreatingToken] = useState(false);
-  const [showTokenValue, setShowTokenValue] = useState<string | null>(null);
+  const [newTokenExpiry, setNewTokenExpiry] = useState(90);
+  // One-time secret returned by create/rotate. Never persisted, never refetched.
+  const [showTokenValue, setShowTokenValue] = useState<{ value: string; rotated: boolean } | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -140,6 +158,7 @@ export default function UserSettings() {
         body: JSON.stringify({
           name: newTokenName.trim(),
           description: newTokenDescription.trim(),
+          expiresInDays: clampExpiry(newTokenExpiry),
         }),
       });
 
@@ -147,7 +166,7 @@ export default function UserSettings() {
         const newToken = await response.json();
         setNewTokenName('');
         setNewTokenDescription('');
-        setShowTokenValue(newToken.token);
+        setShowTokenValue(typeof newToken.token === 'string' ? { value: newToken.token, rotated: false } : null);
         fetchShortcutTokens();
       } else {
         const errorData = await response.json();
@@ -158,6 +177,32 @@ export default function UserSettings() {
       alert('Failed to create token');
     } finally {
       setCreatingToken(false);
+    }
+  };
+
+  const rotateShortcutToken = async (tokenId: string, tokenName: string) => {
+    if (!confirm(`Rotate "${tokenName}"? The current token stops working immediately, and any shortcut using it must be updated with the new token.`)) {
+      return;
+    }
+    setRotatingId(tokenId);
+    try {
+      const response = await fetch(`/api/user/shortcut-tokens/${tokenId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresInDays: clampExpiry(newTokenExpiry) }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && typeof data.token === 'string') {
+        setShowTokenValue({ value: data.token, rotated: true });
+        fetchShortcutTokens();
+      } else {
+        alert(data.error || 'Failed to rotate token');
+      }
+    } catch (error) {
+      console.error('Failed to rotate token:', error);
+      alert('Failed to rotate token');
+    } finally {
+      setRotatingId(null);
     }
   };
 
@@ -229,7 +274,7 @@ export default function UserSettings() {
     <div className="container">
       <div style={{ marginBottom: '20px' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back
+          <span aria-hidden="true">← </span>Back
         </button>
       </div>
 
@@ -357,6 +402,19 @@ export default function UserSettings() {
                 maxLength={200}
               />
             </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="token-expiry">Expires after (days, 1-365)</label>
+              <input
+                id="token-expiry"
+                type="number"
+                min={1}
+                max={365}
+                value={newTokenExpiry}
+                onChange={(e) => setNewTokenExpiry(clampExpiry(Number(e.target.value)))}
+                className="form-input"
+              />
+              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Also used when rotating a token.</p>
+            </div>
             <button
               onClick={createShortcutToken}
               disabled={!newTokenName.trim() || creatingToken}
@@ -389,9 +447,10 @@ export default function UserSettings() {
                 maxHeight: '90vh',
                 overflow: 'auto'
               }}>
-                <h4 style={{ marginBottom: '15px', color: '#059669' }}>✅ Token Created Successfully!</h4>
-                <p style={{ marginBottom: '15px', fontSize: '14px', color: '#64748b' }}>
-                  Save this token safely. For security reasons, you won't be able to view it again.
+                <h4 style={{ marginBottom: '15px', color: '#059669' }}>{showTokenValue.rotated ? 'Token rotated' : 'Token created'}</h4>
+                <p role="alert" style={{ marginBottom: '15px', fontSize: '14px', color: '#b45309', fontWeight: 500 }}>
+                  Copy and save this token now. It is shown only once and cannot be viewed again.
+                  {showTokenValue.rotated && ' The old token no longer works, so update your shortcut.'}
                 </p>
                 <div style={{
                   backgroundColor: '#f8fafc',
@@ -410,12 +469,12 @@ export default function UserSettings() {
                     border: '1px solid #e2e8f0',
                     display: 'block'
                   }}>
-                    {showTokenValue}
+                    {showTokenValue.value}
                   </code>
                 </div>
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                   <button
-                    onClick={() => copyToClipboard(showTokenValue)}
+                    onClick={() => copyToClipboard(showTokenValue.value)}
                     className="btn btn-secondary"
                   >
                     Copy Token
@@ -475,6 +534,9 @@ export default function UserSettings() {
                           </div>
                         )}
                         <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          <code>{token.tokenPrefix}…</code> • {formatTokenExpiry(token.expiresAt)}
+                          {token.scopes && token.scopes.length > 0 && <span> • Scopes: {token.scopes.join(', ')}</span>}
+                          <br />
                           Created: {new Date(token.createdAt).toLocaleDateString()}
                           {token.lastUsed && (
                             <span> • Last used: {new Date(token.lastUsed).toLocaleDateString()}</span>
@@ -496,6 +558,14 @@ export default function UserSettings() {
                           {token.isActive ? 'Disable' : 'Enable'}
                         </button>
                         <button
+                          onClick={() => rotateShortcutToken(token._id, token.name)}
+                          disabled={rotatingId === token._id}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '11px', padding: '4px 8px' }}
+                        >
+                          {rotatingId === token._id ? 'Rotating...' : 'Rotate'}
+                        </button>
+                        <button
                           onClick={() => deleteShortcutToken(token._id, token.name)}
                           className="btn btn-danger"
                           style={{ fontSize: '11px', padding: '4px 8px' }}
@@ -513,7 +583,7 @@ export default function UserSettings() {
                         color: '#3b82f6',
                         userSelect: 'none'
                       }}>
-                        📱 Show Setup Instructions
+                        <span aria-hidden="true">📱 </span>Show Setup Instructions
                       </summary>
                       <div style={{
                         marginTop: '12px',
@@ -534,13 +604,7 @@ export default function UserSettings() {
                               Download the "Upload to Notes" shortcut
                             </a>
                           </li>
-                          <li>Replace the text "replace this with your token" with: <code style={{
-                            backgroundColor: '#fff',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            border: '1px solid #e2e8f0',
-                            fontSize: '11px'
-                          }}>{token.token}</code></li>
+                          <li>Replace the text "replace this with your token" with the token you saved when it was created (starts with <code>{token.tokenPrefix}</code>). Lost it? Rotate to get a new one.</li>
                           <li>Done! Your shortcut is ready to use.</li>
                         </ol>
                       </div>
@@ -552,6 +616,9 @@ export default function UserSettings() {
           </div>
         </div>
 
+      </div>
+      <div id="shared-links" style={{ marginTop: '20px' }}>
+        <BulkShareManager />
       </div>
     </div>
   );

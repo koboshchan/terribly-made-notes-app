@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
-import { deleteDir, getNoteDir } from '@/lib/storage';
+import { processingQueue } from '@/lib/queue';
+import { deleteDir, getNoteDir, saveFile } from '@/lib/storage';
+import { boundedJson, RequestError } from '@/lib/request-limits';
+import path from 'path';
 
 export async function GET(
   request: NextRequest,
@@ -33,6 +36,8 @@ export async function GET(
       flashcards: note.flashcards || [],
       quizQuestions: note.quizQuestions || [],
       createdAt: note.createdAt,
+      updatedAt: note.updatedAt || note.createdAt,
+      recordedAt: note.recordedAt || note.createdAt,
       status: note.status,
       originalFileName: note.originalFileName,
       class: note.noteClass || null,
@@ -59,6 +64,9 @@ export async function DELETE(
     }
 
     const notesCollection = await getCollection('notes');
+    const owned = await notesCollection.findOne({ _id: new ObjectId(id), userId });
+    if (!owned) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+    await processingQueue.cancel(`${userId}_${id}`);
     const result = await notesCollection.deleteOne({
       _id: new ObjectId(id),
       userId,
@@ -93,23 +101,35 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { class: noteClass } = body; // Rename 'class' to 'noteClass' to avoid conflicts
-
-    if (typeof noteClass === 'undefined') {
-      return NextResponse.json({ error: 'No update fields provided' }, { status: 400 });
-    }
-
-    const notesCollection = await getCollection('notes');
-    const result = await notesCollection.updateOne(
-      {
-        _id: new ObjectId(id),
-        userId,
-      },
-      {
-        $set: { noteClass: noteClass },
+    const body = await boundedJson(request, 2 * 1024 * 1024);
+    if (!/^[a-f0-9]{24}$/.test(id)) throw new RequestError('Invalid note ID');
+    const updates: Record<string, any> = { updatedAt: new Date() };
+    for (const [field, max] of [['title', 255], ['content', 1048576]] as const) {
+      if (body[field] !== undefined) {
+        if (typeof body[field] !== 'string' || !body[field].trim() || body[field].length > max) throw new RequestError(`Invalid ${field}`);
+        updates[field] = body[field];
       }
+    }
+    if (body.class !== undefined) {
+      if (body.class !== null && (typeof body.class !== 'string' || body.class.length > 100)) throw new RequestError('Invalid class');
+      updates.noteClass = body.class;
+      updates.classificationSource = 'manual';
+    }
+    if (body.processingPreferences !== undefined) {
+      const prefs = body.processingPreferences;
+      if (!prefs || typeof prefs.flashcards !== 'boolean' || typeof prefs.quiz !== 'boolean') throw new RequestError('Invalid study preferences');
+      updates.processingPreferences = { flashcards: prefs.flashcards, quiz: prefs.quiz };
+    }
+    if (Object.keys(updates).length === 1) throw new RequestError('No update fields provided');
+    const notesCollection = await getCollection('notes');
+    const owned = await notesCollection.findOne({ _id: new ObjectId(id), userId });
+    if (!owned) throw new RequestError('Note not found', 404);
+    if (owned.status === 'processing' && (body.content !== undefined || body.title !== undefined)) throw new RequestError('Wait until processing finishes before editing', 409);
+    const result = await notesCollection.updateOne(
+      { _id: new ObjectId(id), userId },
+      { $set: updates }
     );
+    if (updates.content !== undefined) await saveFile(path.join(getNoteDir(userId, id), 'output.md'), updates.content);
 
     if (result.matchedCount === 0) {
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });
@@ -119,8 +139,8 @@ export async function PATCH(
   } catch (error) {
     console.error('Failed to update note:', error);
     return NextResponse.json(
-      { error: 'Failed to update note' },
-      { status: 500 }
+      { error: error instanceof RequestError ? error.message : 'Failed to update note' },
+      { status: error instanceof RequestError ? error.status : 500 }
     );
   }
 }

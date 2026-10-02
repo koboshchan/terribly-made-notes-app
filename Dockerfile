@@ -46,7 +46,8 @@ COPY --from=builder /app/next.config.js ./next.config.js
 # Runtime secrets (CLERK_SECRET_KEY, MONGODB_URI, etc.) are injected by docker-compose, not baked in
 
 # Create data directory
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R node:node /app
+USER node
 
 EXPOSE 3000
 

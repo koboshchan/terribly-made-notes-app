@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
 
 interface SharedNote {
+  shareAllowChat?: boolean;
   title: string;
   description: string;
   content: string;
@@ -117,12 +118,14 @@ export default function SharedNotePage() {
   return (
     <div className="container">
       <div className="shared-toolbar">
-        <button
-          onClick={() => router.push(`/shared/${params.token}/chat`)}
-          className="btn btn-secondary"
-        >
-          💬 Open Chat
-        </button>
+        {note.shareAllowChat !== false && (
+          <button
+            onClick={() => router.push(`/shared/${params.token}/chat`)}
+            className="btn btn-secondary"
+          >
+            <span aria-hidden="true">💬 </span>Open Chat
+          </button>
+        )}
         <button
           onClick={() => copyNote(note)}
           className="btn btn-secondary"
@@ -137,6 +140,7 @@ export default function SharedNotePage() {
           Download as .md
         </button>
       </div>
+      {note.shareAllowChat === false && <p className="shared-readonly-note" role="note">This share is read-only. The owner has not enabled chat for this link.</p>}
 
       <div className="card">
         <header className="shared-header">

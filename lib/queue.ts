@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto';
+import { getCollection } from './db';
+import { assertUserKeyActive } from './storage';
 export type PipelineStage =
   | 'audioNormalization'
   | 'transcription'
@@ -7,15 +10,19 @@ export type PipelineStage =
 export interface PipelineSettings {
   audioNormalization: {
     parallel: boolean;
+    concurrency?: number;
   };
   transcription: {
     parallel: boolean;
+    concurrency?: number;
   };
   summarization: {
     parallel: boolean;
+    concurrency?: number;
   };
   generation: {
     parallel: boolean;
+    concurrency?: number;
   };
 }
 
@@ -65,6 +72,29 @@ export interface QueueItem {
 }
 
 class ProcessingQueue {
+  private workerId = randomUUID();
+  private timer = setInterval(() => { void this.dispatch().catch(console.error); }, 5000).unref();
+
+  private async persist(item: QueueItem): Promise<void> {
+    try { await assertUserKeyActive(item.userId); }
+    catch {
+      this.queue = this.queue.filter(q => q.userId !== item.userId);
+      await (await getCollection('processing_jobs')).updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { leaseOwner: null, leaseUntil: new Date(0), cancelled: true } });
+      return;
+    }
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId, cancelled: { $ne: true } }, { $set: { ...item, leaseOwner: null, leaseUntil: new Date(0) } });
+    // Cancellation must release the lease without saving stale results.
+    await jobs.updateOne({ id: item.id, leaseOwner: this.workerId, cancelled: true }, { $set: { leaseOwner: null, leaseUntil: new Date(0) } });
+  }
+
+  async getPersistedProgress(id: string) {
+    await this.dispatch();
+    const jobs = await getCollection('processing_jobs');
+    const job = await jobs.findOne({ id });
+    if (!job) return this.getProgress(id);
+    return { queueProgress: job.stageStatus === 'active' ? 100 : 0, processProgress: job.progress, percent: job.progress, status: job.status, message: job.error || job.currentStage, error: job.error };
+  }
   private queue: QueueItem[] = [];
   private cachedPipelineSettings: PipelineSettings = defaultPipelineSettings;
   private lastSettingsFetch = 0;
@@ -80,21 +110,69 @@ class ProcessingQueue {
     markdownPath: string;
     language?: 'english' | 'other';
   }): void {
-    // Remove existing item with same ID if any to prevent duplicates during retry
-    this.queue = this.queue.filter(q => q.id !== item.id);
+    void this.enqueue(item).catch(console.error);
+  }
 
-    const newItem: QueueItem = {
-      ...item,
-      language: item.language || 'english',
-      status: 'queued',
-      currentStage: 'audioNormalization',
-      stageStatus: 'waiting',
-      progress: 0,
-      addedAt: Date.now(),
-    };
+  async enqueue(item: { id: string; userId: string; noteId: string; originalPath: string; mp3Path: string; markdownPath: string; language?: 'english' | 'other' }): Promise<void> {
+    await assertUserKeyActive(item.userId);
+    const jobs = await getCollection('processing_jobs');
+    await jobs.createIndex({ id: 1 }, { unique: true });
+    await jobs.createIndex({ stageStatus: 1, leaseUntil: 1, addedAt: 1 });
+    await jobs.updateOne({ id: item.id }, { $setOnInsert: { ...item, status: 'queued', currentStage: 'audioNormalization', stageStatus: 'waiting', progress: 0, addedAt: Date.now(), leaseUntil: new Date(0) } }, { upsert: true });
+    try {
+      await assertUserKeyActive(item.userId);
+    } catch (error) {
+      await this.cancelUser(item.userId);
+      throw error;
+    }
+    await this.dispatch();
+  }
 
-    this.queue.push(newItem);
-    this.dispatch();
+  async retry(id: string): Promise<boolean> {
+    const jobs = await getCollection('processing_jobs');
+    const existing = await jobs.findOne({ id, cancelled: { $ne: true } });
+    if (!existing) return false;
+    await assertUserKeyActive(existing.userId);
+    const job = await jobs.findOneAndUpdate({ id, stageStatus: 'error', leaseOwner: null, cancelled: { $ne: true } }, { $set: { stageStatus: 'waiting', status: 'queued', error: null }, $inc: { attempt: 1 } }, { returnDocument: 'after' });
+    if (!job) return false;
+    this.queue = this.queue.filter(q => q.id !== id);
+    await this.dispatch();
+    return true;
+  }
+
+  async cancelUser(userId: string): Promise<void> {
+    // Key revocation happens first; active workers cannot save or finalize.
+    this.queue = this.queue.filter(item => item.userId !== userId);
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateMany({ userId }, { $set: { cancelled: true, status: 'error', stageStatus: 'error', error: 'Account deleted' } });
+    // Do not claim temp plaintext has gone away while a subprocess/provider call is active.
+    // Webhook retries cleanup after the active worker releases its lease in finally.
+    if (await jobs.findOne({ userId, leaseOwner: { $ne: null }, leaseUntil: { $gt: new Date() } })) {
+      throw new Error('Account processing cancellation pending');
+    }
+  }
+
+  async cancel(id: string): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    await jobs.updateOne({ id }, { $set: { cancelled: true } });
+    // Keep the directory until active work acknowledges cancellation or its lease expires.
+    for (let i = 0; i < 120; i++) {
+      const job = await jobs.findOne({ id });
+      if (!job || !job.leaseOwner || job.leaseUntil < new Date()) {
+        await jobs.updateOne({ id }, { $set: { stageStatus: 'error', status: 'error', error: 'Cancelled' } });
+        this.queue = this.queue.filter(q => q.id !== id);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error('Cancellation is pending; retry deletion after the worker stops');
+  }
+
+  private async assertActive(item: QueueItem): Promise<void> {
+    await assertUserKeyActive(item.userId);
+    const jobs = await getCollection('processing_jobs');
+    const job = await jobs.findOne({ id: item.id, leaseOwner: this.workerId, cancelled: { $ne: true } });
+    if (!job) throw new Error('Job cancelled or lease lost');
   }
 
   getItem(id: string): QueueItem | undefined {
@@ -139,19 +217,20 @@ class ProcessingQueue {
       const globalSettingsCollection = await getCollection('global_settings');
       const globalSettings = await globalSettingsCollection.findOne({ type: 'models' });
       if (globalSettings?.settings?.pipeline) {
+        const getStageConfig = (stage: PipelineStage) => {
+          const s = globalSettings.settings.pipeline[stage];
+          const def = defaultPipelineSettings[stage];
+          const concurrency = s?.concurrency !== undefined ? s.concurrency : (s?.parallel === false ? 1 : (def.parallel ? 2 : 1));
+          return {
+            parallel: concurrency === -1 || concurrency > 1,
+            concurrency,
+          };
+        };
         this.cachedPipelineSettings = {
-          audioNormalization: {
-            parallel: globalSettings.settings.pipeline.audioNormalization?.parallel ?? defaultPipelineSettings.audioNormalization.parallel,
-          },
-          transcription: {
-            parallel: globalSettings.settings.pipeline.transcription?.parallel ?? defaultPipelineSettings.transcription.parallel,
-          },
-          summarization: {
-            parallel: globalSettings.settings.pipeline.summarization?.parallel ?? defaultPipelineSettings.summarization.parallel,
-          },
-          generation: {
-            parallel: globalSettings.settings.pipeline.generation?.parallel ?? defaultPipelineSettings.generation.parallel,
-          },
+          audioNormalization: getStageConfig('audioNormalization'),
+          transcription: getStageConfig('transcription'),
+          summarization: getStageConfig('summarization'),
+          generation: getStageConfig('generation'),
         };
       }
       this.lastSettingsFetch = now;
@@ -195,40 +274,42 @@ class ProcessingQueue {
     try {
       do {
         this.needsRedispatch = false;
+        const jobs = await getCollection('processing_jobs');
+        await jobs.updateMany({ stageStatus: 'active', leaseUntil: { $lt: new Date() } }, { $set: { stageStatus: 'waiting', leaseOwner: null } });
+        const pending = await jobs.find({ stageStatus: 'waiting', cancelled: { $ne: true } }).toArray();
+        for (const doc of pending) {
+          if (!this.queue.some(q => q.id === doc.id && q.stageStatus === 'active')) {
+            this.queue = this.queue.filter(q => q.id !== doc.id);
+            this.queue.push(doc as unknown as QueueItem);
+          }
+        }
         this.cleanupOldItems();
 
         const pipelineSettings = await this.getPipelineSettings();
 
         for (const stage of PIPELINE_STAGES) {
-          const isParallel = pipelineSettings[stage]?.parallel ?? defaultPipelineSettings[stage].parallel;
+          const config = pipelineSettings[stage];
+          const concurrency = config?.concurrency !== undefined
+            ? config.concurrency
+            : (config?.parallel === false ? 1 : (Number(process.env[`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`]) || 2));
           const activeItems = this.queue.filter(q => q.currentStage === stage && q.stageStatus === 'active');
           const waitingItems = this.queue.filter(q => q.currentStage === stage && q.stageStatus === 'waiting');
 
-          if (!isParallel) {
-            // Sequential mode: exactly 1 item can be active at a time for this stage
-            if (activeItems.length === 0 && waitingItems.length > 0) {
-              waitingItems.sort((a, b) => a.addedAt - b.addedAt);
-              const itemToProcess = waitingItems[0];
-              itemToProcess.stageStatus = 'active';
-              itemToProcess.status = 'processing';
-              this.executeStage(itemToProcess, stage).catch(err => {
-                console.error(`Error in stage '${stage}' for item ${itemToProcess.id}:`, err);
+          // If concurrency is -1, all waiting items are admitted (infinite concurrency).
+          // Otherwise, availableSlots is max(0, concurrency - activeItems.length).
+          const availableSlots = concurrency === -1
+            ? waitingItems.length
+            : Math.max(0, concurrency - activeItems.length);
+
+          if (availableSlots > 0 && waitingItems.length > 0) {
+            waitingItems.sort((a, b) => a.addedAt - b.addedAt);
+            const itemsToProcess = waitingItems.slice(0, availableSlots);
+            for (const item of itemsToProcess) {
+              item.stageStatus = 'active';
+              item.status = 'processing';
+              this.executeStage(item, stage).catch(err => {
+                console.error(`Error in stage '${stage}' for item ${item.id}:`, err);
               });
-            }
-          } else {
-            // Parallel mode: all waiting items run concurrently (up to safety limit)
-            const MAX_CONCURRENT = 10;
-            const availableSlots = Math.max(0, MAX_CONCURRENT - activeItems.length);
-            if (availableSlots > 0 && waitingItems.length > 0) {
-              waitingItems.sort((a, b) => a.addedAt - b.addedAt);
-              const itemsToProcess = waitingItems.slice(0, availableSlots);
-              for (const item of itemsToProcess) {
-                item.stageStatus = 'active';
-                item.status = 'processing';
-                this.executeStage(item, stage).catch(err => {
-                  console.error(`Error in stage '${stage}' for item ${item.id}:`, err);
-                });
-              }
             }
           }
         }
@@ -239,7 +320,12 @@ class ProcessingQueue {
   }
 
   private async executeStage(item: QueueItem, stage: PipelineStage): Promise<void> {
+    const jobs = await getCollection('processing_jobs');
+    const claim = await jobs.findOneAndUpdate({ id: item.id, stageStatus: 'waiting', cancelled: { $ne: true } }, { $set: { stageStatus: 'active', leaseOwner: this.workerId, leaseUntil: new Date(Date.now() + 60000) } }, { returnDocument: 'after' });
+    if (!claim) { this.queue = this.queue.filter(q => q !== item); return; }
+    const heartbeat = setInterval(() => { void jobs.updateOne({ id: item.id, leaseOwner: this.workerId }, { $set: { leaseUntil: new Date(Date.now() + 60000), progress: item.progress } }).catch(console.error); }, 15000);
     try {
+      await this.assertActive(item);
       if (stage === 'audioNormalization') {
         await this.executeAudioNormalization(item);
       } else if (stage === 'transcription') {
@@ -259,6 +345,7 @@ class ProcessingQueue {
       try {
         const { ObjectId } = await import('mongodb');
         const { getCollection } = await import('./db');
+        await this.assertActive(item);
         const notesCollection = await getCollection('notes');
         await notesCollection.updateOne(
           { _id: new ObjectId(item.noteId), userId: item.userId },
@@ -274,6 +361,8 @@ class ProcessingQueue {
         console.error('Failed to update database with error status:', dbError);
       }
     } finally {
+      clearInterval(heartbeat);
+      await this.persist(item);
       // Trigger dispatch so the next item waiting in this stage or next stage can execute immediately
       this.dispatch();
     }
@@ -319,9 +408,13 @@ class ProcessingQueue {
       modelName: selectedModel.modelName,
       task: selectedModel.task,
       temperature: selectedModel.temperature,
-    });
+      capabilities: settings.stt.capabilities,
+    }, () => this.assertActive(item));
 
+    await this.assertActive(item);
     item.transcription = transcription;
+    const { saveFile } = await import('./storage');
+    await saveFile(item.markdownPath.replace(/\.md$/, '.txt'), transcription);
     item.progress = 70;
     item.currentStage = 'summarization';
     item.stageStatus = 'waiting';
@@ -341,7 +434,7 @@ class ProcessingQueue {
       const transcriptPath = item.markdownPath.replace(/\.md$/, '.txt');
       const { readFile, fileExists } = await import('./storage');
       if (fileExists(transcriptPath)) {
-        item.transcription = readFile(transcriptPath).toString('utf-8');
+        item.transcription = (await readFile(transcriptPath)).toString('utf-8');
       } else {
         throw new Error('Transcription missing for summarization step');
       }
@@ -349,6 +442,7 @@ class ProcessingQueue {
 
     item.progress = 75;
     const summary = await summarizeText(item.transcription, settings.llm, userClasses, 'summarization');
+    await this.assertActive(item);
     item.summary = summary;
     item.progress = 90;
 
@@ -374,7 +468,7 @@ class ProcessingQueue {
     if (!item.summary?.content) {
       const { readFile, fileExists } = await import('./storage');
       if (fileExists(item.markdownPath)) {
-        const content = readFile(item.markdownPath).toString('utf-8');
+        const content = (await readFile(item.markdownPath)).toString('utf-8');
         item.summary = {
           title: 'Note',
           description: '',
@@ -385,32 +479,44 @@ class ProcessingQueue {
       }
     }
 
-    // Flashcards & Quiz generated concurrently
-    const [flashcards, quizQuestions] = await Promise.all([
-      generateFlashcards(item.summary.content, settings.llm),
-      generateQuiz(item.summary.content, settings.llm),
-    ]);
-
-    item.progress = 98;
     const notesCollection = await getCollection('notes');
+    const note = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    if (!note) throw new Error('Note was deleted');
+    await this.assertActive(item);
+    const preferences = note?.processingPreferences || settings.studyPreferences || {};
+    const [cardsResult, quizResult] = await Promise.allSettled([
+      preferences.flashcards === false ? Promise.resolve([]) : note?.studyOutcomes?.flashcards === 'completed' ? Promise.resolve(note.flashcards) : generateFlashcards(item.summary.content, settings.llm),
+      preferences.quiz === false ? Promise.resolve([]) : note?.studyOutcomes?.quiz === 'completed' ? Promise.resolve(note.quizQuestions) : generateQuiz(item.summary.content, settings.llm),
+    ]);
+    const flashcards = cardsResult.status === 'fulfilled' ? cardsResult.value : note?.flashcards || [];
+    const quizQuestions = quizResult.status === 'fulfilled' ? quizResult.value : note?.quizQuestions || [];
+    const failed = cardsResult.status === 'rejected' || quizResult.status === 'rejected';
+    const studyOutcomes = { summary: 'completed', flashcards: cardsResult.status === 'fulfilled' ? 'completed' : 'error', quiz: quizResult.status === 'fulfilled' ? 'completed' : 'error' };
+    await this.assertActive(item);
+    item.progress = 98;
     const updateData: any = {
       title: item.summary.title,
       description: item.summary.description,
       content: item.summary.content,
       flashcards,
       quizQuestions,
-      status: 'completed',
+      studyOutcomes,
+      status: failed ? 'error' : 'completed',
       updatedAt: new Date(),
     };
 
-    if (item.summary.noteClass) {
+    const existingNote = await notesCollection.findOne({ _id: new ObjectId(item.noteId), userId: item.userId });
+    if (item.summary.noteClass && existingNote?.classificationSource !== 'manual') {
       updateData.noteClass = item.summary.noteClass;
     }
 
+    await this.assertActive(item);
     await notesCollection.updateOne(
       { _id: new ObjectId(item.noteId), userId: item.userId },
       { $set: updateData }
     );
+
+    if (failed) throw new Error('Some study materials failed; retry resumes only missing outcomes');
 
     // Clean up original raw audio to save space
     deleteFile(item.originalPath);
@@ -520,3 +626,7 @@ class ProcessingQueue {
 }
 
 export const processingQueue = new ProcessingQueue();
+
+export async function cancelUser(userId: string): Promise<void> {
+  await processingQueue.cancelUser(userId);
+}

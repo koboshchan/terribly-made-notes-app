@@ -14,7 +14,7 @@ export async function GET(
     }
 
     const queueId = `${userId}_${id}`;
-    const progress = processingQueue.getProgress(queueId);
+    const progress = await processingQueue.getPersistedProgress(queueId);
 
     return NextResponse.json(progress);
   } catch (error) {

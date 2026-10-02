@@ -3,6 +3,7 @@
 import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { ShareOptions, ShareWarning, buildShareBody } from "@/app/components/ShareControls";
 
 interface Note {
   _id: string;
@@ -35,8 +36,12 @@ export default function Home() {
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [bulkShareLink, setBulkShareLink] = useState<string>('');
   const [bulkShareLoading, setBulkShareLoading] = useState(false);
+  const [bulkAllowChat, setBulkAllowChat] = useState(false);
   const pendingRefresh = useRef<Set<string>>(new Set());
   const lastSelectedIndex = useRef<number>(-1);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [retryingNotes, setRetryingNotes] = useState<{[key: string]: boolean}>({});
 
   const handleDashboardRetry = async (noteId: string) => {
@@ -46,7 +51,7 @@ export default function Home() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchNotes();
+        setNotes(prev => prev.map(n => n._id === noteId ? { ...n, status: 'processing' } : n));
       } else {
         const errData = await response.json();
         alert(errData.error || 'Failed to retry');
@@ -60,9 +65,20 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchNotes();
     fetchUserClasses();
   }, []);
+
+  // Server-side search/sort/class: reset to page 0 on change (debounced for typing)
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    const delay = firstQuery.current ? 0 : 300;
+    firstQuery.current = false;
+    const t = setTimeout(() => fetchNotes(0), delay);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, sortBy, sortOrder, classFilter]);
+
+  useEffect(() => () => fetchAbort.current?.abort(), []);
 
   const fetchUserClasses = async () => {
     try {
@@ -78,73 +94,96 @@ export default function Home() {
 
   useEffect(() => {
     // Poll progress for processing notes
+    // Visibility-aware, backing off from 2s to 15s; pauses while tab is hidden
     const processingNotes = notes.filter(note => note.status === 'processing');
-    if (processingNotes.length > 0) {
-      const interval = setInterval(() => {
-        processingNotes.forEach(note => {
-          fetchProgress(note._id);
-        });
-      }, 2000);
-
-      return () => clearInterval(interval);
-    }
+    if (processingNotes.length === 0) return;
+    let delay = 2000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible') {
+        await Promise.all(processingNotes.map(note => fetchProgress(note._id)));
+        delay = Math.min(Math.round(delay * 1.5), 15000);
+      }
+      if (!cancelled) timer = setTimeout(tick, delay);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        clearTimeout(timer);
+        delay = 2000;
+        tick();
+      }
+    };
+    timer = setTimeout(tick, delay);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [notes]);
 
-  const fetchNotes = async () => {
+  const PAGE_SIZE = 50;
+
+  const fetchAbort = useRef<AbortController | null>(null);
+
+  const fetchNotes = async (pageToLoad = 0) => {
+    // Abort any in-flight request so stale results never overwrite newer ones
+    fetchAbort.current?.abort();
+    const controller = new AbortController();
+    fetchAbort.current = controller;
+    if (pageToLoad > 0) setLoadingMore(true);
     try {
       const params = new URLSearchParams({
         sortBy,
         sortOrder,
         search: searchTerm,
+        page: String(pageToLoad),
+        limit: String(PAGE_SIZE),
       });
-      const response = await fetch(`/api/notes?${params}`);
+      if (classFilter !== 'all') params.set('class', classFilter);
+      const response = await fetch(`/api/notes?${params}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (response.ok) {
-        const data = await response.json();
-        setNotes(data);
-        setFilteredNotes(data);
+        const json = await response.json();
+        if (controller.signal.aborted) return;
+        const data: Note[] = json.map((n: Note & { class?: string }) => ({ ...n, noteClass: n.class ?? n.noteClass }));
+        setHasMore(response.headers.get('X-Has-More') === 'true');
+        setPage(pageToLoad);
+        if (pageToLoad === 0) {
+          setNotes(data);
+        } else {
+          // Append, de-duplicating notes that shifted across page boundaries
+          setNotes(prev => {
+            const seen = new Set(prev.map(n => n._id));
+            return [...prev, ...data.filter(n => !seen.has(n._id))];
+          });
+        }
       }
     } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return;
       console.error('Failed to fetch notes:', error);
     } finally {
-      setLoading(false);
+      if (fetchAbort.current === controller) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   };
 
-  // Filter and sort notes when search term or sort options change
+  const loadMore = () => {
+    if (!loadingMore && hasMore) fetchNotes(page + 1);
+  };
+
+  // Server already applies search/sort/class; only re-apply class locally so
+  // in-place note updates (e.g. reclassification) stay consistent.
   useEffect(() => {
-    let filtered = [...notes];
-
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter(note =>
-        note.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        note.description.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply class filter
-    if (classFilter !== 'all') {
-      if (classFilter === 'unclassified') {
-        filtered = filtered.filter(note => !note.noteClass);
-      } else {
-        filtered = filtered.filter(note => note.noteClass === classFilter);
-      }
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      const dateA = sortBy === 'uploaded' ? new Date(a.createdAt) : new Date(a.recordedAt || a.createdAt);
-      const dateB = sortBy === 'uploaded' ? new Date(b.createdAt) : new Date(b.recordedAt || b.createdAt);
-
-      if (sortOrder === 'desc') {
-        return dateB.getTime() - dateA.getTime();
-      } else {
-        return dateA.getTime() - dateB.getTime();
-      }
-    });
-
-    setFilteredNotes(filtered);
-  }, [notes, searchTerm, sortBy, sortOrder, classFilter]);
+    if (classFilter === 'all') return setFilteredNotes(notes);
+    setFilteredNotes(notes.filter(note =>
+      classFilter === 'unclassified' ? !note.noteClass : note.noteClass === classFilter
+    ));
+  }, [notes, classFilter]);
 
   const fetchProgress = async (noteId: string) => {
     try {
@@ -170,8 +209,7 @@ export default function Home() {
                 setFilteredNotes(prev => prev.map(n => n._id === noteId ? updatedNote : n));
               }
             } catch {
-              // fall back to full refresh if individual fetch fails
-              fetchNotes();
+              // leave the note as-is; next poll or manual reload will reconcile
             }
           }, 1000);
         }
@@ -256,7 +294,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ noteIds: selectedShareableIds }),
+        body: JSON.stringify({ noteIds: selectedShareableIds, ...buildShareBody(bulkAllowChat) }),
       });
 
       if (!response.ok) {
@@ -305,7 +343,7 @@ export default function Home() {
             + New Note
           </Link>
           <Link href="/settings" className="btn btn-secondary">
-            ⚙️ Settings
+            <span aria-hidden="true">⚙️ </span>Settings
           </Link>
           <button
             onClick={() => {
@@ -351,16 +389,29 @@ export default function Home() {
           )}
         </div>
 
-        {isSelectionMode && bulkShareLink && (
+        {isSelectionMode && (
           <div className="card bulk-share-link-card">
-            <p className="bulk-share-link-title">Bulk share link</p>
-            <input
-              type="text"
-              readOnly
-              value={bulkShareLink}
-              className="form-input"
-              aria-label="Bulk share link"
-            />
+            <p className="bulk-share-link-title">{bulkShareLink ? 'Bulk share link' : 'Share settings for selected notes'}</p>
+            <ShareWarning />
+            {bulkShareLink ? (
+              <input
+                type="text"
+                readOnly
+                value={bulkShareLink}
+                className="form-input"
+                aria-label="Bulk share link"
+              />
+            ) : (
+              <ShareOptions
+                idPrefix="bulk-new"
+                allowChat={bulkAllowChat}
+                onAllowChatChange={(allow) => {
+                  if (allow && !confirm('Anyone with the link will be able to chat with AI about these notes, using your account. Allow?')) return;
+                  setBulkAllowChat(allow);
+                }}
+              />
+            )}
+            <p className="share-muted"><Link href="/settings#shared-links">Manage shared links</Link></p>
           </div>
         )}
 
@@ -386,6 +437,7 @@ export default function Home() {
               <input
                 type="text"
                 placeholder="Search notes..."
+                aria-label="Search notes"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="form-input"
@@ -394,6 +446,7 @@ export default function Home() {
               <select
                 value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
+                aria-label="Filter by class"
                 className="form-select"
                 style={{ width: 'auto', margin: 0 }}
               >
@@ -408,6 +461,7 @@ export default function Home() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'uploaded' | 'recorded')}
+                aria-label="Sort notes by"
                 className="form-select"
                 style={{ width: 'auto', margin: 0 }}
               >
@@ -416,6 +470,8 @@ export default function Home() {
               </select>
               <button
                 onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                aria-label={sortOrder === 'desc' ? 'Sorted newest first. Switch to oldest first' : 'Sorted oldest first. Switch to newest first'}
+                title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
                 className="btn btn-secondary"
                 style={{ padding: '8px 12px', fontSize: '12px' }}
               >
@@ -445,6 +501,7 @@ export default function Home() {
                       <input
                         type="checkbox"
                         checked={selectedNoteIds.includes(note._id)}
+                        aria-label={`Select ${note.title}`}
                         onChange={() => {/* handled by onClick */}}
                         onClick={(e) => handleNoteSelection(note._id, e)}
                         style={{ marginRight: '15px', transform: 'scale(1.4)', cursor: 'pointer' }}
@@ -540,6 +597,13 @@ export default function Home() {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {!loading && hasMore && (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <button onClick={loadMore} className="btn btn-secondary" disabled={loadingMore}>
+                {loadingMore ? 'Loading...' : 'Load more notes'}
+              </button>
             </div>
           )}
         </div>

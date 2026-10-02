@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect } from "react";
+import { loadProgress, saveProgress, clearProgress } from '@/lib/studyProgress';
 
 interface QuizQuestion {
   question: string;
@@ -13,7 +14,7 @@ interface QuizQuestion {
 }
 
 export default function QuizPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
@@ -59,7 +60,13 @@ export default function QuizPage() {
           return answers.sort(() => Math.random() - 0.5);
         });
           setRandomizedAnswers(randomized);
-          setCurrentIndex(0);
+          const saved = loadProgress<{ index: number; completed: boolean }>(userId, `quiz:${id}`);
+          if (saved && saved.index < questions.length) {
+            setCurrentIndex(saved.index);
+            setQuizCompleted(Boolean(saved.completed));
+          } else {
+            setCurrentIndex(0);
+          }
           setHintRevealed(new Array(questions.length).fill(false));
         }
       } else if (response.status === 404) {
@@ -71,6 +78,12 @@ export default function QuizPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (quizQuestions.length > 0) {
+      saveProgress(userId, `quiz:${params.id}`, { index: currentIndex, completed: quizCompleted });
+    }
+  }, [currentIndex, quizCompleted, quizQuestions.length, params.id, userId]);
 
   const selectAnswer = (index: number) => {
     setSelectedAnswer(index);
@@ -97,6 +110,7 @@ export default function QuizPage() {
   };
 
   const restartQuiz = () => {
+    clearProgress(userId, `quiz:${params.id}`);
     const randomized = quizQuestions.map((q: QuizQuestion) => {
       const answers = [
         { text: q.correctAnswer, isCorrect: true },
@@ -142,19 +156,19 @@ export default function QuizPage() {
     <div className="container">
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back
+          <span aria-hidden="true">← </span>Back
         </button>
         <button 
           onClick={() => router.push(`/note/${params.id}`)}
           className="btn btn-secondary"
         >
-          📄 Note
+          <span aria-hidden="true">📄 </span>Note
         </button>
         <button 
           onClick={() => router.push(`/note/${params.id}/chat`)}
           className="btn btn-secondary"
         >
-          💬 Chat
+          <span aria-hidden="true">💬 </span>Chat
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={downloadQuiz} className="btn btn-primary" disabled={quizQuestions.length === 0}>
@@ -165,7 +179,7 @@ export default function QuizPage() {
       <div className="card">
         <header style={{ marginBottom: '20px', borderBottom: '1px solid #e2e8f0', paddingBottom: '15px' }}>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '5px' }}>
-            📝 Quiz
+            <span aria-hidden="true">📝 </span>Quiz
           </h1>
           <p style={{ color: '#6b7280', fontSize: '14px' }}>
             {noteTitle} • {quizQuestions.length} questions
@@ -196,7 +210,7 @@ export default function QuizPage() {
                       color: '#92400e'
                     }}
                   >
-                    💡 Show Hint
+                    <span aria-hidden="true">💡 </span>Show Hint
                   </button>
                 )}
                 {hintRevealed[currentIndex] && quizQuestions[currentIndex]?.hint && (
@@ -248,7 +262,7 @@ export default function QuizPage() {
                       </p>
                     </div>
                     <button onClick={nextQuestion} className="btn btn-primary" style={{ width: '100%' }}>
-                      {currentIndex < quizQuestions.length - 1 ? 'Next Question →' : 'See Results'}
+                      {currentIndex < quizQuestions.length - 1 ? 'Next Question' : 'See Results'}
                     </button>
                   </div>
                 )}

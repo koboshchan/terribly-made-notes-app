@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect } from "react";
+import { loadProgress, saveProgress } from '@/lib/studyProgress';
 
 interface Flashcard {
   front: string;
@@ -10,7 +11,7 @@ interface Flashcard {
 }
 
 export default function FlashcardsPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
@@ -44,7 +45,8 @@ export default function FlashcardsPage() {
         const cards = data.flashcards || [];
         setFlashcards(cards);
         if (cards.length > 0) {
-          setCurrentIndex(0);
+          const saved = loadProgress<{ index: number }>(userId, `flashcards:${id}`);
+          setCurrentIndex(saved && saved.index < cards.length ? saved.index : 0);
         }
       } else if (response.status === 404) {
         router.push('/');
@@ -55,6 +57,12 @@ export default function FlashcardsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (flashcards.length > 0) {
+      saveProgress(userId, `flashcards:${params.id}`, { index: currentIndex });
+    }
+  }, [currentIndex, flashcards.length, params.id, userId]);
 
   const nextCard = () => {
     if (currentIndex < flashcards.length - 1) {
@@ -101,19 +109,19 @@ export default function FlashcardsPage() {
     <div className="container">
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back
+          <span aria-hidden="true">← </span>Back
         </button>
         <button 
           onClick={() => router.push(`/note/${params.id}`)}
           className="btn btn-secondary"
         >
-          📄 Note
+          <span aria-hidden="true">📄 </span>Note
         </button>
         <button 
           onClick={() => router.push(`/note/${params.id}/chat`)}
           className="btn btn-secondary"
         >
-          💬 Chat
+          <span aria-hidden="true">💬 </span>Chat
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={downloadFlashcards} className="btn btn-primary" disabled={flashcards.length === 0}>
@@ -124,7 +132,7 @@ export default function FlashcardsPage() {
       <div className="card">
         <header style={{ marginBottom: '20px', borderBottom: '1px solid #e2e8f0', paddingBottom: '15px' }}>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '5px' }}>
-            🎴 Flashcards
+            <span aria-hidden="true">🎴 </span>Flashcards
           </h1>
           <p style={{ color: '#6b7280', fontSize: '14px' }}>
             {noteTitle} • {flashcards.length} cards
@@ -137,10 +145,10 @@ export default function FlashcardsPage() {
               <span>Card {currentIndex + 1} of {flashcards.length}</span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={prevCard} disabled={currentIndex === 0} className="btn btn-secondary">
-                  ← Previous
+                  <span aria-hidden="true">← </span>Previous
                 </button>
                 <button onClick={nextCard} disabled={currentIndex >= flashcards.length - 1} className="btn btn-secondary">
-                  Next →
+                  Next<span aria-hidden="true"> →</span>
                 </button>
               </div>
             </div>
