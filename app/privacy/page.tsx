@@ -40,19 +40,6 @@ export default function PrivacyPage() {
         for getting any consent the law requires.
       </p>
 
-      <h2>Public links</h2>
-      <p>
-        If you create a share link for a note, anyone who has that link can view it. You can delete a share
-        link to stop access, but people who already saw or copied the content may still have it.
-      </p>
-
-      <h2>Encryption</h2>
-      <p>
-        Audio and generated files on disk are encrypted with a key unique to your account. That key is itself
-        encrypted with a server master key and stored in the database. This is not end-to-end encryption: the
-        server can decrypt your files to process them. Note text in MongoDB is not covered by this encryption.
-      </p>
-
       <h2>Retention and deletion</h2>
       <p>
         Your data stays until you delete it or delete your account. You can delete individual notes at any
