@@ -22,10 +22,15 @@ export default function PrivacyPage() {
 
       <h2>AI processing</h2>
       <p>
-        When you upload a recording, the audio is sent to a third-party speech-to-text service to make a
-        transcript, and the text is sent to a third-party language model to make summaries and answer chat
-        questions. Which providers are used depends on the endpoints the operator configures. Those providers
-        handle the data under their own policies. We can&apos;t promise what they log, keep, or train on.
+        Your uploaded audio is saved solely to transcribe your audio to text and generate your notes, summaries,
+        and study materials. We promise that your audio and transcripts are never used to train artificial
+        intelligence or machine learning models, and are never shared, sold, or provided to the public (unless you
+        explicitly choose to create a public share link for a note).
+      </p>
+      <p>
+        To perform transcription and generate summaries, audio and note text are sent to speech-to-text and
+        language model endpoints configured by the operator. These services process your data strictly to fulfill
+        your requests and under configurations where your data is not used for model training.
       </p>
 
       <h2>Recordings and consent</h2>
@@ -62,8 +67,9 @@ export default function PrivacyPage() {
       </p>
       <p>
         Backups are a limit here. A backup made before deletion may still contain your notes and your file
-        key, and could be used to restore them until that backup is rotated out. Copies held by Clerk or the
-        AI providers are outside this app&apos;s control.
+        key, and could be used to restore them until that backup is rotated out. Transient operational logs held
+        by Clerk or upstream AI service providers are outside this app&apos;s direct control, though providers
+        are configured under commitments that do not train on your data.
       </p>
 
       <h2>Changes</h2>
