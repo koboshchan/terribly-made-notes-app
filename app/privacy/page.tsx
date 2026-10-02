@@ -42,23 +42,8 @@ export default function PrivacyPage() {
 
       <h2>Retention and deletion</h2>
       <p>
-        Your data stays until you delete it or delete your account. You can delete individual notes at any
-        time. When you delete your account, your file key is destroyed first, which makes the encrypted files
-        unreadable. Then all live data tied to your account is permanently deleted from MongoDB and disk: notes,
-        transcripts, summaries, study materials, share links, shortcut tokens, processing jobs, settings, any
-        chat history stored on the server, and your files. If that cleanup is interrupted, it is retried when
-        Clerk sends its signed account-deletion notice, so it can take a little while to finish.
-      </p>
-      <p>
-        We keep a small permanent deletion record and nonce safety records so a key for your account can never
-        be recreated or reused. These contain no note content or files.
-      </p>
-      <p>
-        Backups are a limit here. A backup made before deletion may still contain your notes and your file
-        key, and could be used to restore them until that backup is rotated out. Transient operational logs held
-        by Clerk or upstream language model providers are outside this app&apos;s direct control, though language
-        models are configured under commitments that do not train on your data. Audio recordings are never sent
-        to any third party.
+        Your data is destroyed fully upon account deletion, and can be requested to be deleted via email at{" "}
+        <a href="mailto:lz@kjt.lol">lz@kjt.lol</a>.
       </p>
 
       <h2>Changes</h2>

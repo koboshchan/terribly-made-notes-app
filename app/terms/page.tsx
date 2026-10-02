@@ -139,8 +139,8 @@ export default function TermsPage() {
       <h2>9. Termination and Suspension</h2>
       <p>
         You may stop using the Service and terminate your account at any time through the App settings. Upon account deletion,
-        your encryption keys are destroyed and account data is purged in accordance with our{" "}
-        <Link href="/privacy">Privacy Policy</Link>.
+        your data is destroyed fully in accordance with our <Link href="/privacy">Privacy Policy</Link>. You may also request
+        deletion of your data via email at <a href="mailto:lz@kjt.lol">lz@kjt.lol</a>.
       </p>
       <p>
         The operator reserves the right to suspend, restrict, or terminate your access to the Service at any time, with or
