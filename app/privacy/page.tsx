@@ -28,9 +28,10 @@ export default function PrivacyPage() {
         explicitly choose to create a public share link for a note).
       </p>
       <p>
-        To perform transcription and generate summaries, audio and note text are sent to speech-to-text and
-        language model endpoints configured by the operator. These services process your data strictly to fulfill
-        your requests and under configurations where your data is not used for model training.
+        Speech-to-text transcription is run locally on our infrastructure, and your audio recordings are never
+        uploaded to any third party. To generate summaries, study tools, and answer chat questions, note text is
+        processed using language model endpoints configured by the operator, strictly to fulfill your requests and
+        under configurations where your data is not used for model training.
       </p>
 
       <h2>Recordings and consent</h2>
@@ -68,8 +69,9 @@ export default function PrivacyPage() {
       <p>
         Backups are a limit here. A backup made before deletion may still contain your notes and your file
         key, and could be used to restore them until that backup is rotated out. Transient operational logs held
-        by Clerk or upstream AI service providers are outside this app&apos;s direct control, though providers
-        are configured under commitments that do not train on your data.
+        by Clerk or upstream language model providers are outside this app&apos;s direct control, though language
+        models are configured under commitments that do not train on your data. Audio recordings are never sent
+        to any third party.
       </p>
 
       <h2>Changes</h2>

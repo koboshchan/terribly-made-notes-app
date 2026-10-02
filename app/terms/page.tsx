@@ -43,9 +43,10 @@ export default function TermsPage() {
       </p>
       <p>
         You grant the operator a limited, non-exclusive, worldwide, royalty-free license to host, store, transfer, decrypt,
-        format, and process your User Content solely as necessary to operate, maintain, and provide the Service to you. This
-        includes transmitting audio and text to configured speech-to-text and language model endpoints solely to fulfill your
-        transcription, summary, chat, and study tool requests.
+        format, and process your User Content solely as necessary to operate, maintain, and provide the Service to you.
+        Speech-to-text transcription runs locally on our infrastructure, and your audio recordings are never uploaded to any
+        third party. Transcribed note text may be processed using configured language model endpoints solely to fulfill your
+        summary, chat, and study tool requests.
       </p>
       <p>
         <strong>No Model Training:</strong> As detailed in our <Link href="/privacy">Privacy Policy</Link>, your User Content
@@ -129,9 +130,10 @@ export default function TermsPage() {
 
       <h2>8. Third-Party Services and Endpoints</h2>
       <p>
-        The Service relies on third-party services, including Clerk for identity management and operator-configured speech-to-text
-        and language model providers for content processing. Your interaction with third-party authentication services is
-        subject to the respective third party&apos;s terms and policies.
+        The Service relies on third-party services, including Clerk for identity management and operator-configured language model
+        providers for text summarization and chat. Speech-to-text transcription runs locally on our infrastructure, and your
+        audio recordings are never uploaded to any third-party speech-to-text service. Your interaction with third-party
+        authentication and language model services is subject to the respective third party&apos;s terms and policies.
       </p>
 
       <h2>9. Termination and Suspension</h2>
