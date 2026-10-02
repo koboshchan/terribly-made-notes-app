@@ -38,15 +38,19 @@ interface ModelSettings {
   pipeline: {
     audioNormalization: {
       parallel: boolean;
+      concurrency?: number;
     };
     transcription: {
       parallel: boolean;
+      concurrency?: number;
     };
     summarization: {
       parallel: boolean;
+      concurrency?: number;
     };
     generation: {
       parallel: boolean;
+      concurrency?: number;
     };
   };
 }
@@ -211,11 +215,17 @@ export default function AdminModelsPage() {
       if (response.ok) {
         showNotification('API settings saved successfully!');
       } else {
-        throw new Error('Failed to save settings');
+        let msg = 'Failed to save settings';
+        try {
+          const body = await response.json();
+          if (body?.error) msg = body.error;
+        } catch { /* ignore */ }
+        throw new Error(msg);
       }
     } catch (error) {
       console.error('Failed to save settings:', error);
-      showNotification('Failed to save settings. Please try again.', true);
+      const msg = error instanceof Error ? error.message : 'Failed to save settings. Please try again.';
+      showNotification(msg, true);
     } finally {
       setSaving(false);
     }
@@ -242,17 +252,18 @@ export default function AdminModelsPage() {
     }));
   };
 
-  const updatePipelineSetting = (stage: keyof ModelSettings['pipeline'], parallel: boolean) => {
+  const updateConcurrency = (stage: keyof ModelSettings['pipeline'], value: number) =>
     setSettings(prev => ({
       ...prev,
       pipeline: {
         ...prev.pipeline,
         [stage]: {
-          parallel,
+          ...prev.pipeline[stage],
+          concurrency: value,
+          parallel: value === -1 || value > 1,
         },
       },
     }));
-  };
 
   // Helper function to safely get nested STT settings
   const getSafeSTTSettings = () => ({
@@ -268,7 +279,27 @@ export default function AdminModelsPage() {
     description: string,
     behaviorNote: string
   ) => {
-    const isParallel = settings.pipeline?.[key]?.parallel ?? true;
+    const stage = settings.pipeline?.[key];
+    const concurrency = stage?.concurrency ?? (stage?.parallel === false ? 1 : 2);
+    const isInfinite = concurrency === -1;
+    const isSequential = concurrency === 1;
+
+    let badgeText = `⚡ Parallel (${concurrency} at once)`;
+    let badgeBg = '#dbeafe';
+    let badgeColor = '#1d4ed8';
+    let badgeBorder = '#93c5fd';
+
+    if (isInfinite) {
+      badgeText = '⚡ Infinite (All at once)';
+      badgeBg = '#dcfce7';
+      badgeColor = '#15803d';
+      badgeBorder = '#86efac';
+    } else if (isSequential) {
+      badgeText = '⏳ Sequential (1 at a time queue)';
+      badgeBg = '#fef3c7';
+      badgeColor = '#92400e';
+      badgeBorder = '#fde68a';
+    }
 
     return (
       <div
@@ -298,15 +329,15 @@ export default function AdminModelsPage() {
                 fontWeight: '600',
                 padding: '2px 10px',
                 borderRadius: '9999px',
-                backgroundColor: isParallel ? '#dcfce7' : '#fef3c7',
-                color: isParallel ? '#15803d' : '#92400e',
-                border: `1px solid ${isParallel ? '#86efac' : '#fde68a'}`,
+                backgroundColor: badgeBg,
+                color: badgeColor,
+                border: `1px solid ${badgeBorder}`,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '4px',
               }}
             >
-              {isParallel ? '⚡ Parallel (All at once)' : '⏳ Sequential (1 at a time queue)'}
+              {badgeText}
             </span>
           </div>
           <p style={{ fontSize: '0.875rem', color: '#475569', margin: '0 0 4px 0', paddingLeft: '32px' }}>
@@ -317,52 +348,26 @@ export default function AdminModelsPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span
-            style={{
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              color: isParallel ? '#16a34a' : '#64748b',
-              minWidth: '90px',
-              textAlign: 'right',
-            }}
-          >
-            {isParallel ? 'Parallel ON' : 'Parallel OFF'}
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isParallel}
-            aria-label={`Toggle parallel processing for Step ${stepNumber}: ${title}`}
-            onClick={() => updatePipelineSetting(key, !isParallel)}
-            style={{
-              position: 'relative',
-              width: '52px',
-              height: '28px',
-              backgroundColor: isParallel ? '#2563eb' : '#cbd5e1',
-              borderRadius: '9999px',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s',
-              padding: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                top: '3px',
-                left: isParallel ? '26px' : '4px',
-                width: '22px',
-                height: '22px',
-                backgroundColor: '#ffffff',
-                borderRadius: '50%',
-                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
-                transition: 'left 0.2s',
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.875rem', fontWeight: 500, color: '#334155' }}>
+            <span>Max concurrent:</span>
+            <input
+              type="number"
+              min={-1}
+              max={10}
+              step={1}
+              className="form-input"
+              style={{ width: '80px', textAlign: 'center', fontWeight: 'bold' }}
+              value={concurrency}
+              onChange={(e) => {
+                const n = Math.trunc(Number(e.target.value));
+                if (n === -1 || (Number.isInteger(n) && n >= 1 && n <= 10)) updateConcurrency(key, n);
               }}
             />
-          </button>
+          </label>
+          <small style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+            1 to 10, or -1 for infinite
+          </small>
         </div>
       </div>
     );
