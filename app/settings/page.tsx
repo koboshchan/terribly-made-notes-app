@@ -69,7 +69,7 @@ export default function UserSettings() {
       const response = await fetch('/api/user/classes');
       if (response.ok) {
         const data = await response.json();
-        setClasses(data);
+        setClasses(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Failed to fetch classes:', error);
@@ -136,7 +136,7 @@ export default function UserSettings() {
       const response = await fetch('/api/user/shortcut-tokens');
       if (response.ok) {
         const data = await response.json();
-        setShortcutTokens(data);
+        setShortcutTokens(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Failed to fetch shortcut tokens:', error);
@@ -169,7 +169,7 @@ export default function UserSettings() {
         setShowTokenValue(typeof newToken.token === 'string' ? { value: newToken.token, rotated: false } : null);
         fetchShortcutTokens();
       } else {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         alert(errorData.error || 'Failed to create token');
       }
     } catch (error) {
@@ -508,8 +508,8 @@ export default function UserSettings() {
                     borderRadius: '8px',
                     backgroundColor: 'white'
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                         <div style={{
                           fontWeight: '500',
                           marginBottom: '4px',
@@ -543,7 +543,7 @@ export default function UserSettings() {
                           )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+                      <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                         <button
                           onClick={() => toggleTokenStatus(token._id, token.isActive)}
                           className="btn"

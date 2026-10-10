@@ -153,7 +153,11 @@ export default function FlashcardsPage() {
               </div>
             </div>
             <div 
+              role="button"
+              tabIndex={0}
+              aria-pressed={flipped}
               onClick={() => setFlipped(!flipped)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFlipped(f => !f); } }}
               style={{ 
                 minHeight: '200px',
                 display: 'flex',
