@@ -84,7 +84,7 @@ export default function FlashcardsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${noteTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_flashcards.json`;
+    link.download = `${noteTitle.replace(/[^\p{L}\p{N}]/gu, '_').toLowerCase()}_flashcards.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

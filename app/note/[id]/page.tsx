@@ -277,7 +277,7 @@ export default function NotePage({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${note.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    link.download = `${note.title.replace(/[^\p{L}\p{N}]/gu, '_').toLowerCase()}.md`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -303,7 +303,7 @@ export default function NotePage({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${note?.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`;
+    link.download = `${note?.title.replace(/[^\p{L}\p{N}]/gu, '_').toLowerCase()}_transcript.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

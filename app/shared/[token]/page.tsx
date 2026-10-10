@@ -62,7 +62,7 @@ export default function SharedNotePage() {
   const sanitizeFileName = (value: string) => {
     return value
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '') || 'shared-note';
   };
 
