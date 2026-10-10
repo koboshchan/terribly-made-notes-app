@@ -59,4 +59,18 @@ describe('frontend regression guards (source level)', () => {
     const note = src('note/[id]/page.tsx');
     expect(note).toMatch(/note\.status === 'processing' \|\| note\.status === 'queued'/);
   });
+  it('shared bulk Download All shows a visible error when a fetch fails', () => {
+    const bulk = src('shared/bulk/[token]/page.tsx');
+    expect(bulk).toContain('setDownloadError(');
+    expect(bulk).toMatch(/role="alert">\{downloadError\}/);
+  });
+  it('download filenames keep non-Latin letters instead of collapsing to underscores', () => {
+    const files = ['note/[id]/page.tsx', 'note/[id]/quiz/page.tsx', 'note/[id]/flashcards/page.tsx', 'shared/[token]/page.tsx', 'shared/bulk/[token]/page.tsx', 'shared/bulk/[token]/note/[noteId]/page.tsx'];
+    for (const f of files) {
+      const text = src(f);
+      expect(text, f).toContain('[^\\p{L}\\p{N}]');
+      expect(text, f).not.toContain('[^a-z0-9]');
+    }
+    expect('测试 笔记!'.replace(/[^\p{L}\p{N}]/gu, '_')).toBe('测试_笔记_');
+  });
 });
