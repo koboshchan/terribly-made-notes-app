@@ -18,6 +18,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!/^[a-f0-9]{24}$/.test(id)) return NextResponse.json({ error: 'Invalid note ID' }, { status: 400 });
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({
       _id: new ObjectId(id),
@@ -63,6 +64,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!/^[a-f0-9]{24}$/.test(id)) return NextResponse.json({ error: 'Invalid note ID' }, { status: 400 });
     const notesCollection = await getCollection('notes');
     const owned = await notesCollection.findOne({ _id: new ObjectId(id), userId });
     if (!owned) return NextResponse.json({ error: 'Note not found' }, { status: 404 });

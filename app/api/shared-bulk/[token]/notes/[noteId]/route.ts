@@ -5,6 +5,7 @@ import { activeShareFilter } from '@/lib/share';
 
 type SharedSet = {
   noteIds: ObjectId[];
+  userId: string;
 };
 
 export async function GET(
@@ -34,6 +35,7 @@ export async function GET(
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({
       _id: noteObjectId,
+      userId: sharedSet.userId,
       status: 'completed',
     });
 
