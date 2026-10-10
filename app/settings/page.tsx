@@ -37,7 +37,7 @@ function formatTokenExpiry(expiresAt: string | null): string {
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function TokenDialog({ value, rotated, onCopy, onClose }: { value: string; rotated: boolean; onCopy: () => void; onClose: () => void }) {
+function TokenDialog({ value, rotated, onCopy, onClose, fallbackFocusId }: { value: string; rotated: boolean; onCopy: () => void; onClose: () => void; fallbackFocusId: string }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   const titleId = useId();
@@ -69,9 +69,12 @@ function TokenDialog({ value, rotated, onCopy, onClose }: { value: string; rotat
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
-      if (previous && previous.isConnected) previous.focus();
+      const canFocus = previous && previous !== document.body && previous.isConnected && !(previous as HTMLButtonElement).disabled;
+      // Defer until React has removed the dialog; removing the focused node would otherwise reset focus to body.
+      const target = canFocus ? previous : document.getElementById(fallbackFocusId);
+      window.setTimeout(() => target?.focus(), 0);
     };
-  }, []);
+  }, [fallbackFocusId]);
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
@@ -504,6 +507,7 @@ export default function UserSettings() {
               rotated={showTokenValue.rotated}
               onCopy={() => copyToClipboard(showTokenValue.value)}
               onClose={() => setShowTokenValue(null)}
+              fallbackFocusId="settings-field-3"
             />
           )}
 

@@ -114,7 +114,9 @@ describe('shared note chat IME guard and token dialog a11y', () => {
     expect(s).toContain('aria-labelledby={titleId}');
     expect(s).toContain("e.key === 'Escape'");
     expect(s).toContain("e.key !== 'Tab'");
-    expect(s).toContain('previous.focus()');
+    expect(s).toContain('previous !== document.body');
+    expect(s).toContain('previous.isConnected');
+    expect(s).toContain('fallbackFocusId');
     expect(s).toContain('<TokenDialog');
   });
 });
