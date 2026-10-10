@@ -291,8 +291,9 @@ export default function UserSettings() {
           <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
             <h4 style={{ marginBottom: '15px', fontSize: '16px' }}>Add New Class</h4>
             <div className="form-group">
-              <label className="form-label">Class Name</label>
+              <label className="form-label" htmlFor="settings-field-1">Class Name</label>
               <input
+                id="settings-field-1"
                 type="text"
                 value={newClassName}
                 onChange={(e) => setNewClassName(e.target.value)}
@@ -302,8 +303,9 @@ export default function UserSettings() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Description (Optional)</label>
+              <label className="form-label" htmlFor="settings-field-2">Description (Optional)</label>
               <input
+                id="settings-field-2"
                 type="text"
                 value={newClassDescription}
                 onChange={(e) => setNewClassDescription(e.target.value)}
@@ -381,8 +383,9 @@ export default function UserSettings() {
           <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
             <h4 style={{ marginBottom: '15px', fontSize: '16px' }}>Create New Shortcut Token</h4>
             <div className="form-group">
-              <label className="form-label">Token Name</label>
+              <label className="form-label" htmlFor="settings-field-3">Token Name</label>
               <input
+                id="settings-field-3"
                 type="text"
                 value={newTokenName}
                 onChange={(e) => setNewTokenName(e.target.value)}
@@ -392,8 +395,9 @@ export default function UserSettings() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Description (Optional)</label>
+              <label className="form-label" htmlFor="settings-field-4">Description (Optional)</label>
               <input
+                id="settings-field-4"
                 type="text"
                 value={newTokenDescription}
                 onChange={(e) => setNewTokenDescription(e.target.value)}

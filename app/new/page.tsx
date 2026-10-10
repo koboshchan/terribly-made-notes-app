@@ -304,7 +304,17 @@ export default function NewNote() {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
+            role="button"
+            tabIndex={0}
+            aria-label="Select an audio file to upload"
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
           >
             <p style={{ fontSize: '18px', marginBottom: '10px' }}>
               Drop an audio file here or click to select
@@ -317,6 +327,9 @@ export default function NewNote() {
               type="file"
               accept=".mp3, .wav, .m4a, .aac, audio/*"
               onChange={handleFileInputChange}
+              tabIndex={-1}
+              aria-hidden="true"
+              onClick={(e) => e.stopPropagation()}
               style={{ display: 'none' }}
             />
           </div>
@@ -348,10 +361,11 @@ export default function NewNote() {
             </p>
 
             <div style={{ marginBottom: '20px' }}>
-              <label className="form-label" style={{ display: 'block', marginBottom: '8px' }}>
+              <label className="form-label" htmlFor="upload-language" style={{ display: 'block', marginBottom: '8px' }}>
                 Audio Language
               </label>
               <select
+                id="upload-language"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as 'english' | 'other')}
                 className="form-select"

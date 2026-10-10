@@ -74,3 +74,29 @@ describe('frontend regression guards (source level)', () => {
     expect('测试 笔记!'.replace(/[^\p{L}\p{N}]/gu, '_')).toBe('测试_笔记_');
   });
 });
+
+describe('keyboard and label accessibility guards (source level)', () => {
+  it('upload drop zone is keyboard operable without double-firing the picker', () => {
+    const upload = src('new/page.tsx');
+    expect(upload).toContain('role="button"');
+    expect(upload).toContain('tabIndex={0}');
+    expect(upload).toContain("e.key === 'Enter' || e.key === ' '");
+    expect(upload).toContain('e.target !== e.currentTarget');
+    expect(upload).toContain('e.stopPropagation()');
+    expect(upload).toContain('htmlFor="upload-language"');
+    expect(upload).toContain('id="upload-language"');
+  });
+  it.each(['settings/page.tsx', 'admin/models/page.tsx'])('%s form labels are associated with controls', (f) => {
+    const s = src(f);
+    expect(s).not.toMatch(/<label className="form-label">/);
+    const fors = [...s.matchAll(/htmlFor="([^"]+)"/g)].map((m) => m[1]);
+    for (const id of new Set(fors)) expect(s).toContain('id="' + id + '"');
+  });
+});
+
+describe('shared bulk chat IME guard', () => {
+  it('does not send on Enter while composing', () => {
+    expect(src('shared/bulk/[token]/chat/page.tsx')).toContain("e.key === 'Enter' && !e.nativeEvent.isComposing");
+  });
+});
+
