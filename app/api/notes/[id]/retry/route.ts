@@ -19,7 +19,6 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    await assertUserKeyActive(userId);
     const notesCollection = await getCollection('notes');
     const note = await notesCollection.findOne({
       _id: new ObjectId(id),
@@ -29,6 +28,8 @@ export async function POST(
     if (!note) {
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });
     }
+
+    await assertUserKeyActive(userId);
 
     if (note.status !== 'error') {
       return NextResponse.json({ error: 'Note is not in error state' }, { status: 400 });

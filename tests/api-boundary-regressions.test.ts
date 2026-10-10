@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), findOne: vi.fn(), insertOne: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), findOne: vi.fn(), insertOne: vi.fn(), assertKey: vi.fn() }));
 vi.mock('@clerk/nextjs/server', () => ({ auth: mocks.auth }));
 vi.mock('../lib/db', () => ({ getCollection: vi.fn(async () => mocks) }));
 vi.mock('../lib/queue', () => ({ processingQueue: {} }));
+vi.mock('../lib/storage', () => ({ assertUserKeyActive: mocks.assertKey }));
 import { GET as bulkDetail } from '../app/api/shared-bulk/[token]/notes/[noteId]/route';
 import { GET as noteGet, DELETE as noteDelete } from '../app/api/notes/[id]/route';
 import { POST as createClass } from '../app/api/user/classes/route';
+import { POST as retryNote } from '../app/api/notes/[id]/retry/route';
 const id = 'a'.repeat(24);
 function request(method = 'GET', body?: unknown) {
   return new NextRequest('https://notes.example/api/notes/' + id, {
@@ -15,6 +17,11 @@ function request(method = 'GET', body?: unknown) {
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'owner' }); });
 describe('API input and ownership boundaries', () => {
+  it('denies a foreign retry before requiring an encryption key for a fresh account', async () => {
+    mocks.findOne.mockResolvedValue(null);
+    expect((await retryNote(request('POST'), { params: Promise.resolve({ id }) })).status).toBe(404);
+    expect(mocks.assertKey).not.toHaveBeenCalled();
+  });
   it('scopes bulk detail to the share owner even when a foreign ID appears in a legacy set', async () => {
     mocks.findOne.mockResolvedValueOnce({ noteIds: [], userId: 'owner' }).mockResolvedValueOnce(null);
     const response = await bulkDetail(request(), { params: Promise.resolve({ token: 'b'.repeat(48), noteId: id }) });
