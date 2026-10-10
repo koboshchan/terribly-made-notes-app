@@ -75,7 +75,7 @@ export function normalizedPipeline(value: any, defaults: any) {
     const def = defaults[stage] || {};
     const concurrency = raw.concurrency !== undefined
       ? raw.concurrency
-      : envNumber(`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`, 1, 10, raw.parallel === false ? 1 : 2);
+      : envNumber(`PIPELINE_${stage.toUpperCase()}_CONCURRENCY`, 1, 10, (raw.parallel ?? def.parallel) === false ? 1 : 2);
     const parallel = raw.parallel !== undefined ? raw.parallel : (concurrency === -1 || concurrency > 1);
     return [stage, { ...def, ...raw, parallel, concurrency }];
   }));
