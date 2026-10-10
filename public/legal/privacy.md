@@ -1,0 +1,45 @@
+Notes Privacy Policy
+
+Draft for review, not yet effective. Prepared October 9, 2026.
+
+Lucas Zhang, also known as kobosh, operates Notes at notes.kobosh.com and its iOS companion as a minor-run hobby project in British Columbia, Canada. Lucas is responsible for privacy questions and requests at lz@kjt.lol.
+
+Clerk manages sign-in and processes the account information you provide, linked sign-in information if you choose that method, and session and device information for authentication. The Notes database associates your content with a Clerk user identifier and stores registration time and an administrator flag where applicable. Notes does not store your Clerk password.
+
+Notes receives audio you upload or record, filenames, selected language, and audio metadata such as duration, format, bitrate, sample rate, channel count, and recording time when available. It stores transcripts, generated titles and descriptions, study notes, flashcards, quiz questions, class names and descriptions, class assignments, processing status, errors, timestamps, and sharing records. Shortcut upload features also store tokens and their associated names and account identifiers.
+
+Chat requests include your messages, the recent history sent by the client, and relevant note content. The current main-branch web chat keeps its conversation in page memory rather than a persistent chat database. This does not prevent an AI provider or error log from retaining request information. Support messages include whatever you choose to send the operator.
+
+Audio is normalized and sent to the configured speech-to-text endpoint. The intended transcription setup is the operator's self-hosted Speaches service. Transcripts and, when relevant, class descriptions are sent to the configured language-model endpoint to generate summaries and study materials. Chat sends note context and conversation text. The code allows the operator to change these endpoints, including to a third-party OpenAI-compatible service; its OpenAI defaults do not prove which provider is deployed.
+
+Text-to-speech provider settings exist, but the reviewed web and iOS code does not implement an in-app request or player using that provider. If a speech-generation feature is introduced, this notice must describe which text is sent and to whom before that feature is used.
+
+The operator must confirm the current language-model operator, any upstream providers behind a proxy, and their processing locations before publication. You may ask lz@kjt.lol about the active providers before uploading. Their request retention and model-training practices depend on their terms and configuration; Notes cannot promise that every configured provider discards requests or excludes them from training.
+
+The operator can access server records and files when administering the service, providing support, or investigating errors. Shared content is also accessible to recipients. Information may be disclosed where required by law or reasonably necessary to protect security or legal rights.
+
+Notes uses information to authenticate you, process audio, save and organize notes, generate study materials, answer chat requests, provide sharing and exports, diagnose failures, protect the service, and handle support or privacy requests. The reviewed application has no advertising, payment, or third-party analytics integration and no feature that sells personal information or trains its own model on your notes.
+
+The backend stores records in MongoDB and audio and generated files in a server data directory. The operator and infrastructure may process IP addresses, request paths, timestamps, browser or device details, and operational errors. Logs can include generated content or provider response text when processing fails. Hosting and network operators and AI providers may process data outside Canada, where authorities may have lawful access. The deployed infrastructure operators, storage locations, and log retention must be confirmed before publication.
+
+Clerk uses cookies and related storage for authentication and security. Blocking these may prevent sign-in. The reviewed main-branch web application has no separate advertising cookies or analytics tracker.
+
+On iOS, microphone access is requested for recording. Imported audio is accessed when you select or share it. The app saves recordings and caches note lists, classes, and note details on the device for offline access. The reviewed main branch also stores an authentication token in shared app-group preferences for its upload extension. Server deletion does not automatically clear every device cache, recording, export, or device backup. Other app versions may use different local storage safeguards.
+
+Sharing creates a secret URL that anyone possessing it can open without signing in. Depending on the share type and client, it exposes the shared note's title, description, content, creation time, and associated study material. Public chat can send shared content and a visitor's conversation to an AI provider. The reviewed main branch does not enforce share expiry or offer a standalone revocation endpoint. Deleting the note stops it being returned by the share endpoints, but recipients may already have copies. Do not put sensitive content in a shared note.
+
+The processing worker attempts to delete the original upload after successful study-material generation. Converted audio, transcript files, generated files, and database records remain until deletion. Failed or interrupted jobs may retain the original for retry. There is no general automatic expiry for saved notes.
+
+Deleting a note removes its active database record and associated server directory in the normal deletion flow. Shared-set metadata may remain, and deletion racing an active processing job may leave additional records or files requiring manual cleanup. The current main branch has no complete account-data deletion route or Clerk deletion webhook. Closing a Clerk account alone must not be treated as proof that Notes content was deleted. Contact lz@kjt.lol for complete removal and verification.
+
+Deletion does not erase provider-held requests, recipient copies, exports, offline caches, or infrastructure logs. Backup and log retention intervals are not established by the reviewed code. The operator must confirm those intervals before publication; no fixed deletion deadline or cryptographic erasure guarantee is claimed here.
+
+You may review notes and transcripts, export available content, update class assignments and classes, and delete notes. You can ask for access to your personal information and its uses and disclosures, correction, deletion, or withdrawal of consent. The operator may verify your identity proportionately, explain any lawful refusal, and respond within applicable legal deadlines. Withdrawal may prevent the service from performing features requiring your information.
+
+Applicable rights may arise under British Columbia's Personal Information Protection Act or Canada's Personal Information Protection and Electronic Documents Act, depending on the activity. This notice does not limit those rights. You may raise concerns with the Office of the Information and Privacy Commissioner for British Columbia at https://www.oipc.bc.ca or the Office of the Privacy Commissioner of Canada at https://www.priv.gc.ca.
+
+Only submit other people's recordings or information with appropriate permission. Notes is not intended for children under 13. Parents or guardians can request help with a child's information at lz@kjt.lol. Access restrictions and account authentication reduce risk, but no online service can guarantee complete security.
+
+Material policy changes will be announced before taking effect. New uses requiring consent will be presented separately. Contact lz@kjt.lol with questions.
+
+Adapted from General Legal's attorney-drafted CC0 Privacy Policy template at https://github.com/General-Legal/legal-templates. General Legal has not reviewed or endorsed this adaptation.

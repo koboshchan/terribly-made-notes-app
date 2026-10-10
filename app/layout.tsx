@@ -1,3 +1,5 @@
+import styles from "./components/legal/legal.module.css";
+import LegalFooter from "./components/legal/LegalFooter";
 import type { Metadata } from "next";
 import {
   ClerkProvider,
@@ -25,6 +27,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <head>
+          <meta charSet="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         </head>
         <body>
@@ -51,9 +54,16 @@ export default function RootLayout({
               </div>
             </div>
           </header>
+          <SignedOut>
+            <p className={styles.signupNotice}>
+              Before signing up, read the <Link href="/terms">Terms</Link> and{" "}
+              <Link href="/privacy">Privacy Policy</Link>.
+            </p>
+          </SignedOut>
           <main>
             {children}
           </main>
+          <LegalFooter />
         </body>
       </html>
     </ClerkProvider>
