@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { BulkShareManager } from "@/app/components/ShareControls";
 
 interface UserClass {
@@ -33,6 +33,75 @@ function formatTokenExpiry(expiresAt: string | null): string {
   const d = new Date(expiresAt);
   if (Number.isNaN(d.getTime())) return 'No expiry set';
   return d.getTime() < Date.now() ? `Expired ${d.toLocaleDateString()}` : `Expires ${d.toLocaleDateString()}`;
+}
+
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function TokenDialog({ value, rotated, onCopy, onClose }: { value: string; rotated: boolean; onCopy: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  const titleId = useId();
+  const descId = useId();
+
+  useEffect(() => { closeRef.current = onClose; });
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const node = dialogRef.current;
+    const focusables = () => Array.from(node?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    (focusables()[0] ?? node)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) { e.preventDefault(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!node?.contains(active)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (previous && previous.isConnected) previous.focus();
+    };
+  }, []);
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
+        tabIndex={-1}
+        style={{ backgroundColor: 'white', padding: '30px', borderRadius: '12px', maxWidth: '500px', width: '90%', maxHeight: '90vh', overflow: 'auto' }}
+      >
+        <h4 id={titleId} style={{ marginBottom: '15px', color: '#059669' }}>{rotated ? 'Token rotated' : 'Token created'}</h4>
+        <p id={descId} style={{ marginBottom: '15px', fontSize: '14px', color: '#b45309', fontWeight: 500 }}>
+          Copy and save this token now. It is shown only once and cannot be viewed again.
+          {rotated && ' The old token no longer works, so update your shortcut.'}
+        </p>
+        <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
+          <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '5px' }}>Your Token:</p>
+          <code style={{ fontSize: '12px', wordBreak: 'break-all', backgroundColor: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #e2e8f0', display: 'block' }}>
+            {value}
+          </code>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+          <button onClick={onCopy} className="btn btn-secondary">Copy Token</button>
+          <button onClick={onClose} className="btn btn-primary">I&apos;ve Saved It</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function UserSettings() {
@@ -430,68 +499,12 @@ export default function UserSettings() {
 
           {/* Token display modal */}
           {showTokenValue && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: 'white',
-                padding: '30px',
-                borderRadius: '12px',
-                maxWidth: '500px',
-                width: '90%',
-                maxHeight: '90vh',
-                overflow: 'auto'
-              }}>
-                <h4 style={{ marginBottom: '15px', color: '#059669' }}>{showTokenValue.rotated ? 'Token rotated' : 'Token created'}</h4>
-                <p role="alert" style={{ marginBottom: '15px', fontSize: '14px', color: '#b45309', fontWeight: 500 }}>
-                  Copy and save this token now. It is shown only once and cannot be viewed again.
-                  {showTokenValue.rotated && ' The old token no longer works, so update your shortcut.'}
-                </p>
-                <div style={{
-                  backgroundColor: '#f8fafc',
-                  padding: '15px',
-                  borderRadius: '6px',
-                  marginBottom: '20px',
-                  border: '1px solid #e2e8f0'
-                }}>
-                  <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '5px' }}>Your Token:</p>
-                  <code style={{
-                    fontSize: '12px',
-                    wordBreak: 'break-all',
-                    backgroundColor: '#fff',
-                    padding: '8px',
-                    borderRadius: '4px',
-                    border: '1px solid #e2e8f0',
-                    display: 'block'
-                  }}>
-                    {showTokenValue.value}
-                  </code>
-                </div>
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={() => copyToClipboard(showTokenValue.value)}
-                    className="btn btn-secondary"
-                  >
-                    Copy Token
-                  </button>
-                  <button
-                    onClick={() => setShowTokenValue(null)}
-                    className="btn btn-primary"
-                  >
-                    I've Saved It
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TokenDialog
+              value={showTokenValue.value}
+              rotated={showTokenValue.rotated}
+              onCopy={() => copyToClipboard(showTokenValue.value)}
+              onClose={() => setShowTokenValue(null)}
+            />
           )}
 
           {/* Existing tokens list */}

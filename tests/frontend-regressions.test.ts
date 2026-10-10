@@ -100,3 +100,21 @@ describe('shared bulk chat IME guard', () => {
   });
 });
 
+
+describe('shared note chat IME guard and token dialog a11y', () => {
+  it('shared note chat does not send on Enter while composing and avoids deprecated onKeyPress', () => {
+    const s = src('shared/[token]/chat/page.tsx');
+    expect(s).toContain("e.key === 'Enter' && !e.nativeEvent.isComposing");
+    expect(s).not.toContain('onKeyPress');
+  });
+  it('settings token overlay is a labelled modal dialog with focus management', () => {
+    const s = src('settings/page.tsx');
+    expect(s).toContain('role="dialog"');
+    expect(s).toContain('aria-modal="true"');
+    expect(s).toContain('aria-labelledby={titleId}');
+    expect(s).toContain("e.key === 'Escape'");
+    expect(s).toContain("e.key !== 'Tab'");
+    expect(s).toContain('previous.focus()');
+    expect(s).toContain('<TokenDialog');
+  });
+});
