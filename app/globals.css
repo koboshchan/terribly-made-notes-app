@@ -456,7 +456,6 @@ body {
 }
 
 .shared-chat-card {
-  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 80vh;
@@ -469,7 +468,6 @@ body {
 }
 
 .shared-chat-messages {
-  min-width: 0;
   flex: 1;
   overflow-y: auto;
   padding: 20px;
@@ -499,9 +497,6 @@ body {
 }
 
 .shared-chat-assistant-bubble {
-  min-width: 0;
-  overflow-x: auto;
-  overflow-wrap: anywhere;
   padding: 16px;
   background-color: white;
   border: 1px solid #e2e8f0;
@@ -524,17 +519,8 @@ body {
   gap: 10px;
 }
 
-.shared-chat-input-row {
-  min-width: 0;
-}
-
 .shared-chat-input-row .form-input {
   flex: 1;
-  min-width: 0;
-}
-
-.shared-chat-input-row .btn {
-  flex-shrink: 0;
 }
 
 .bulk-share-link-card {
@@ -552,11 +538,6 @@ body {
 
 .shared-flex-spacer {
   flex: 1;
-  min-width: 0;
-}
-
-.shared-chat-toolbar .btn {
-  flex-shrink: 0;
 }
 
 /* Mobile-specific responsive utilities */
