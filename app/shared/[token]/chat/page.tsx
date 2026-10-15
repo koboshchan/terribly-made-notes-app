@@ -172,7 +172,7 @@ export default function SharedNoteChatPage() {
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChatMessage(); }}
             placeholder="Ask a question about this note..."
             className="form-input"
             aria-label="Ask a question about this note"

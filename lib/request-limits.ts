@@ -28,7 +28,11 @@ export async function boundedBody(request: Request, limit: number): Promise<Uint
 }
 
 export async function boundedJson(request: Request, limit = 65536): Promise<any> {
-  try { return JSON.parse(new TextDecoder().decode(await boundedBody(request, limit))); }
+  try {
+    const value = JSON.parse(new TextDecoder().decode(await boundedBody(request, limit)));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestError('JSON object required');
+    return value;
+  }
   catch (error) {
     if (error instanceof RequestError) throw error;
     throw new RequestError('Invalid JSON');

@@ -30,6 +30,14 @@ export default function NoteChatPage() {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1025px)');
+    const update = () => setWide(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     setupMarkdownRenderer();
@@ -151,7 +159,7 @@ export default function NoteChatPage() {
 
   return (
     <div className="container">
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
           <span aria-hidden="true">← </span>Back to Note
         </button>
@@ -161,7 +169,7 @@ export default function NoteChatPage() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: showNotePreview() ? '1fr 1fr' : '1fr', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: showNotePreview() ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: '20px' }}>
         {/* Note Content Preview */}
         {showNotePreview() && (
           <div className="card">
@@ -178,6 +186,7 @@ export default function NoteChatPage() {
 
         {/* Chat Panel */}
         <div className="card" style={{ 
+          minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           height: showNotePreview() ? '70vh' : '80vh'
@@ -248,21 +257,22 @@ export default function NoteChatPage() {
           </div>
 
           {/* Chat Input */}
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', minWidth: 0 }}>
             <input
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChatMessage(); }}
               placeholder="Ask a question about this note..."
               aria-label="Ask a question about this note"
               className="form-input"
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0 }}
               disabled={chatLoading}
             />
             <button
               onClick={sendChatMessage}
               className="btn btn-primary"
+              style={{ flexShrink: 0 }}
               disabled={!chatInput.trim() || chatLoading}
               aria-label="Send message"
             >
@@ -275,6 +285,6 @@ export default function NoteChatPage() {
   );
 
   function showNotePreview() {
-    return typeof window !== 'undefined' && window.innerWidth > 1024;
+    return wide;
   }
 }

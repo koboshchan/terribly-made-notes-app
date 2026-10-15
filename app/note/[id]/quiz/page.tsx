@@ -55,7 +55,7 @@ export default function QuizPage() {
         const randomized = questions.map((q: QuizQuestion) => {
           const answers = [
             { text: q.correctAnswer, isCorrect: true },
-            ...q.wrongAnswers.map((a: string) => ({ text: a, isCorrect: false }))
+            ...(q.wrongAnswers || []).map((a: string) => ({ text: a, isCorrect: false }))
           ];
           return answers.sort(() => Math.random() - 0.5);
         });
@@ -86,6 +86,7 @@ export default function QuizPage() {
   }, [currentIndex, quizCompleted, quizQuestions.length, params.id, userId]);
 
   const selectAnswer = (index: number) => {
+    if (selectedAnswer !== null) return;
     setSelectedAnswer(index);
   };
 
@@ -114,7 +115,7 @@ export default function QuizPage() {
     const randomized = quizQuestions.map((q: QuizQuestion) => {
       const answers = [
         { text: q.correctAnswer, isCorrect: true },
-        ...q.wrongAnswers.map((a: string) => ({ text: a, isCorrect: false }))
+        ...(q.wrongAnswers || []).map((a: string) => ({ text: a, isCorrect: false }))
       ];
       return answers.sort(() => Math.random() - 0.5);
     });
@@ -131,7 +132,7 @@ export default function QuizPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${noteTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_quiz.json`;
+    link.download = `${noteTitle.replace(/[^\p{L}\p{N}]/gu, '_').toLowerCase()}_quiz.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

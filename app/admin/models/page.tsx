@@ -540,8 +540,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-1">Base URL</label>
             <input
+              id="admin-model-1"
               type="url"
               className="form-input"
               value={settings.stt.baseUrl}
@@ -550,8 +551,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-2">API Key</label>
             <input
+              id="admin-model-2"
               type="password"
               className="form-input"
               value={settings.stt.apiKey}
@@ -566,9 +568,10 @@ export default function AdminModelsPage() {
             </h4>
 
             <div className="form-group">
-              <label className="form-label">Model Name</label>
+              <label className="form-label" htmlFor="admin-model-3">Model Name</label>
               {models.stt ? (
               <select
+                id="admin-model-3"
                 className="form-select"
                 value={settings.stt.english?.modelName || ''}
                 onChange={(e) => updateSettings('stt', 'english', { ...getSafeSTTSettings().english, modelName: e.target.value })}
@@ -579,6 +582,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-3"
                 type="text"
                 className="form-input"
                 value={settings.stt.english?.modelName || ''}
@@ -588,8 +592,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Task</label>
+              <label className="form-label" htmlFor="admin-model-4">Task</label>
               <select
+                id="admin-model-4"
                 className="form-select"
                 value={settings.stt.english?.task || 'transcribe'}
                 onChange={(e) => updateSettings('stt', 'english', { ...getSafeSTTSettings().english, task: e.target.value as 'transcribe' | 'translate' })}
@@ -600,8 +605,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Temperature (0.0 - 1.0)</label>
+              <label className="form-label" htmlFor="admin-model-5">Temperature (0.0 - 1.0)</label>
               <input
+                id="admin-model-5"
                 type="number"
                 min="0"
                 max="1"
@@ -620,9 +626,10 @@ export default function AdminModelsPage() {
             </h4>
 
             <div className="form-group">
-              <label className="form-label">Model Name</label>
+              <label className="form-label" htmlFor="admin-model-6">Model Name</label>
               {models.stt ? (
               <select
+                id="admin-model-6"
                 className="form-select"
                 value={settings.stt.other?.modelName || ''}
                 onChange={(e) => updateSettings('stt', 'other', { ...getSafeSTTSettings().other, modelName: e.target.value })}
@@ -633,6 +640,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-6"
                 type="text"
                 className="form-input"
                 value={settings.stt.other?.modelName || ''}
@@ -642,8 +650,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Task</label>
+              <label className="form-label" htmlFor="admin-model-7">Task</label>
               <select
+                id="admin-model-7"
                 className="form-select"
                 value={settings.stt.other?.task || 'transcribe'}
                 onChange={(e) => updateSettings('stt', 'other', { ...getSafeSTTSettings().other, task: e.target.value as 'transcribe' | 'translate' })}
@@ -654,8 +663,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Temperature (0.0 - 1.0)</label>
+              <label className="form-label" htmlFor="admin-model-8">Temperature (0.0 - 1.0)</label>
               <input
+                id="admin-model-8"
                 type="number"
                 min="0"
                 max="1"
@@ -675,8 +685,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-9">Base URL</label>
             <input
+              id="admin-model-9"
               type="url"
               className="form-input"
               value={settings.llm.baseUrl}
@@ -685,8 +696,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-10">API Key</label>
             <input
+              id="admin-model-10"
               type="password"
               className="form-input"
               value={settings.llm.apiKey}
@@ -695,12 +707,13 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Summarization Model</label>
+            <label className="form-label" htmlFor="admin-model-11">Summarization Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for generating note summaries from transcriptions
             </p>
             {models.llm ? (
               <select
+                id="admin-model-11"
                 className="form-select"
                 value={settings.llm.summarizationModel}
                 onChange={(e) => updateSettings('llm', 'summarizationModel', e.target.value)}
@@ -711,6 +724,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-11"
                 type="text"
                 className="form-input"
                 value={settings.llm.summarizationModel}
@@ -720,12 +734,13 @@ export default function AdminModelsPage() {
           </div>
 
             <div className="form-group">
-            <label className="form-label">Quiz & Flashcard Model</label>
+            <label className="form-label" htmlFor="admin-model-12">Quiz & Flashcard Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for generating flashcards and quiz questions
             </p>
             {models.llm ? (
               <select
+                id="admin-model-12"
                 className="form-select"
                 value={settings.llm.quizModel}
                 onChange={(e) => updateSettings('llm', 'quizModel', e.target.value)}
@@ -736,6 +751,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-12"
                 type="text"
                 className="form-input"
                 value={settings.llm.quizModel}
@@ -745,12 +761,13 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Chat Model</label>
+            <label className="form-label" htmlFor="admin-model-13">Chat Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for conversational AI chat about the note
             </p>
             {models.llm ? (
               <select
+                id="admin-model-13"
                 className="form-select"
                 value={settings.llm.chatModel}
                 onChange={(e) => updateSettings('llm', 'chatModel', e.target.value)}
@@ -761,6 +778,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-13"
                 type="text"
                 className="form-input"
                 value={settings.llm.chatModel}
@@ -777,8 +795,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-14">Base URL</label>
             <input
+              id="admin-model-14"
               type="url"
               className="form-input"
               value={settings.tts.baseUrl}
@@ -787,8 +806,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-15">API Key</label>
             <input
+              id="admin-model-15"
               type="password"
               className="form-input"
               value={settings.tts.apiKey}
@@ -797,9 +817,10 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Model Name</label>
+            <label className="form-label" htmlFor="admin-model-16">Model Name</label>
             {models.tts ? (
               <select
+                id="admin-model-16"
                 className="form-select"
                 value={settings.tts.modelName}
                 onChange={(e) => updateSettings('tts', 'modelName', e.target.value)}
@@ -810,6 +831,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-16"
                 type="text"
                 className="form-input"
                 value={settings.tts.modelName}
@@ -819,8 +841,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Voice</label>
+            <label className="form-label" htmlFor="admin-model-17">Voice</label>
             <input
+              id="admin-model-17"
               type="text"
               className="form-input"
               value={settings.tts.voice}
@@ -829,8 +852,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Response Format</label>
+            <label className="form-label" htmlFor="admin-model-18">Response Format</label>
             <input
+              id="admin-model-18"
               type="text"
               className="form-input"
               value={settings.tts.responseFormat}
@@ -839,8 +863,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Speed (0.5 - 2.0)</label>
+            <label className="form-label" htmlFor="admin-model-19">Speed (0.5 - 2.0)</label>
             <input
+              id="admin-model-19"
               type="number"
               min="0.5"
               max="2.0"
@@ -852,8 +877,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Sample Rate (8000 - 48000)</label>
+            <label className="form-label" htmlFor="admin-model-20">Sample Rate (8000 - 48000)</label>
             <input
+              id="admin-model-20"
               type="number"
               min="8000"
               max="48000"

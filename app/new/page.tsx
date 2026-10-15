@@ -14,6 +14,7 @@ export default function NewNote() {
   const [queueProgress, setQueueProgress] = useState(0);
   const [processProgress, setProcessProgress] = useState(0);
   const [currentStatus, setCurrentStatus] = useState('');
+  const [uploadError, setUploadError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorNoteId, setErrorNoteId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -24,6 +25,17 @@ export default function NewNote() {
   const [generateQuiz, setGenerateQuiz] = useState(true);
   // Stable per selected file so retries of the same attempt are deduplicated server-side
   const idempotencyKey = useRef<string | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmounted = useRef(false);
+  const pollGeneration = useRef(0);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      pollGeneration.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -41,7 +53,7 @@ export default function NewNote() {
 
   const handleFileSelect = (selectedFile: File) => {
     // Check if file is audio
-    if (!selectedFile.type.startsWith('audio/')) {
+    if (!selectedFile.type.startsWith('audio/') && !/\.(mp3|m4a|wav|aac|ogg|opus|flac|webm|mp4)$/i.test(selectedFile.name)) {
       alert('Please select an audio file.');
       return;
     }
@@ -81,6 +93,7 @@ export default function NewNote() {
     if (!file) return;
 
     setUploading(true);
+    setUploadError('');
     setErrorNoteId(null);
     setUploadProgress(0);
     setQueueProgress(0);
@@ -107,23 +120,51 @@ export default function NewNote() {
       });
 
       xhr.addEventListener('load', () => {
+        let result: { noteId?: unknown; error?: unknown } = {};
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (parsed && typeof parsed === 'object') result = parsed;
+        } catch {}
+        // Text only: never render raw server bodies, cap length
+        const serverError = typeof result.error === 'string' ? result.error.trim().slice(0, 300) : '';
+        const fail = (fallback: string) => {
+          const msg = serverError || fallback;
+          setUploadError(msg);
+          setCurrentStatus(msg);
+          setUploading(false);
+          showNotification(msg, true);
+          reject(new Error(msg));
+        };
         if (xhr.status >= 200 && xhr.status < 300) {
-          const result = JSON.parse(xhr.responseText);
+          if (typeof result.noteId !== 'string' || !result.noteId) {
+            fail('Upload failed: unexpected server response.');
+            return;
+          }
           setCurrentStatus('Upload complete! Processing...');
           pollProgress(result.noteId);
           resolve();
         } else {
-          alert('Upload failed. Please try again.');
-          setUploading(false);
-          reject(new Error('Upload failed'));
+          fail(`Upload failed (HTTP ${xhr.status}). Please try again.`);
         }
       });
 
       xhr.addEventListener('error', () => {
         console.error('Upload failed');
-        alert('Upload failed. Please try again.');
+        const msg = 'Upload failed: network error. Please try again.';
+        setUploadError(msg);
+        setCurrentStatus(msg);
         setUploading(false);
-        reject(new Error('Upload failed'));
+        showNotification(msg, true);
+        reject(new Error(msg));
+      });
+
+      xhr.addEventListener('timeout', () => {
+        const msg = 'Upload timed out. Please try again.';
+        setUploadError(msg);
+        setCurrentStatus(msg);
+        setUploading(false);
+        showNotification(msg, true);
+        reject(new Error(msg));
       });
 
       xhr.addEventListener('abort', () => {
@@ -137,33 +178,60 @@ export default function NewNote() {
     });
   };
 
+  const stopPolling = () => {
+    pollGeneration.current += 1;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollTimer.current = null;
+  };
+
   const pollProgress = async (noteId: string) => {
-    try {
-      const response = await fetch(`/api/notes/${noteId}/progress`);
-      if (response.ok) {
+    // Each poll chain owns a generation; reset/unmount/new chain invalidates older ones
+    const generation = ++pollGeneration.current;
+    const tick = async () => {
+      if (unmounted.current || generation !== pollGeneration.current) return;
+      const schedule = (ms: number) => {
+        if (unmounted.current || generation !== pollGeneration.current) return;
+        pollTimer.current = setTimeout(tick, ms);
+      };
+      try {
+        const response = await fetch(`/api/notes/${noteId}/progress`);
+        if (unmounted.current || generation !== pollGeneration.current) return;
+        if (!response.ok) {
+          schedule(2000);
+          return;
+        }
         const progress = await response.json();
+        if (unmounted.current || generation !== pollGeneration.current) return;
 
-        setQueueProgress(progress.queueProgress);
-        setProcessProgress(progress.processProgress);
-        setCurrentStatus(progress.status);
+        const status: string = typeof progress.status === 'string' ? progress.status : '';
+        const failed = status === 'error' || status.includes('Error:');
+        const providerError: string = typeof progress.error === 'string' ? progress.error : '';
 
-        if (progress.status === 'completed') {
+        setQueueProgress(progress.queueProgress ?? 0);
+        setProcessProgress(progress.processProgress ?? 0);
+
+        if (status === 'completed') {
+          setCurrentStatus(status);
           setUploading(false);
           showNotification('Note created successfully!', false);
-          // Immediately redirect to the completed note
           router.push(`/note/${noteId}`);
-        } else if (progress.status.includes('Error:')) {
+        } else if (failed) {
+          const detail = providerError || (status !== 'error' ? status : '') || 'Processing failed';
+          setCurrentStatus(detail);
           setUploading(false);
           setErrorNoteId(noteId);
-          showNotification('Processing failed. Please try again.', true);
+          showNotification(`Processing failed: ${detail}`, true);
         } else {
-          // Continue polling
-          setTimeout(() => pollProgress(noteId), 1000);
+          setCurrentStatus(progress.message || status);
+          schedule(1000);
         }
+      } catch (error) {
+        if (unmounted.current || generation !== pollGeneration.current) return;
+        console.error('Failed to get progress:', error);
+        schedule(2000);
       }
-    } catch (error) {
-      console.error('Failed to get progress:', error);
-    }
+    };
+    await tick();
   };
 
   const showNotification = (message: string, isError: boolean) => {
@@ -173,11 +241,13 @@ export default function NewNote() {
     document.body.appendChild(notification);
 
     setTimeout(() => {
-      document.body.removeChild(notification);
+      notification.remove();
     }, 5000);
   };
 
   const resetUpload = () => {
+    stopPolling();
+    setUploadError('');
     idempotencyKey.current = null;
     setFile(null);
     setLanguage('english');
@@ -205,7 +275,7 @@ export default function NewNote() {
       if (response.ok) {
         pollProgress(errorNoteId);
       } else {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to retry');
       }
     } catch (err: any) {
@@ -213,6 +283,7 @@ export default function NewNote() {
       showNotification(err.message || 'Retry failed', true);
       setErrorNoteId(errorNoteId);
       setUploading(false);
+      setCurrentStatus(err.message || 'Retry failed');
     } finally {
       setRetrying(false);
     }
@@ -233,7 +304,17 @@ export default function NewNote() {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
+            role="button"
+            tabIndex={0}
+            aria-label="Select an audio file to upload"
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
           >
             <p style={{ fontSize: '18px', marginBottom: '10px' }}>
               Drop an audio file here or click to select
@@ -246,6 +327,9 @@ export default function NewNote() {
               type="file"
               accept=".mp3, .wav, .m4a, .aac, audio/*"
               onChange={handleFileInputChange}
+              tabIndex={-1}
+              aria-hidden="true"
+              onClick={(e) => e.stopPropagation()}
               style={{ display: 'none' }}
             />
           </div>
@@ -266,15 +350,22 @@ export default function NewNote() {
               </div>
             )}
 
+            {uploadError && (
+              <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '12px', marginBottom: '20px', color: '#b91c1c', overflowWrap: 'anywhere' }}>
+                {uploadError}
+              </div>
+            )}
+
             <p style={{ marginBottom: '20px' }}>
               Selected file: <strong>{file.name}</strong>
             </p>
 
             <div style={{ marginBottom: '20px' }}>
-              <label className="form-label" style={{ display: 'block', marginBottom: '8px' }}>
+              <label className="form-label" htmlFor="upload-language" style={{ display: 'block', marginBottom: '8px' }}>
                 Audio Language
               </label>
               <select
+                id="upload-language"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as 'english' | 'other')}
                 className="form-select"
@@ -326,7 +417,7 @@ export default function NewNote() {
                   {retrying ? 'Retrying...' : 'Retry Processing'}
                 </button>
               ) : (
-                <button onClick={uploadFile} className="btn btn-primary">
+                <button onClick={() => { uploadFile().catch(() => {}); }} className="btn btn-primary">
                   Upload & Process
                 </button>
               )}

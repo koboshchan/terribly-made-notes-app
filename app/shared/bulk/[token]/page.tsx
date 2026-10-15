@@ -22,6 +22,7 @@ export default function SharedBulkPage() {
   const [error, setError] = useState<string | null>(null);
   const [allowChat, setAllowChat] = useState(true);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchSharedSet = async () => {
@@ -59,7 +60,7 @@ export default function SharedBulkPage() {
   const sanitizeFileName = (value: string) => {
     return value
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '') || 'shared-notes';
   };
 
@@ -69,6 +70,7 @@ export default function SharedBulkPage() {
     }
 
     setDownloadingAll(true);
+    setDownloadError(null);
     try {
       const detailResponses = await Promise.all(
         notes.map((note) =>
@@ -106,8 +108,9 @@ export default function SharedBulkPage() {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
-    } catch (downloadError) {
-      console.error('Failed to download all shared notes:', downloadError);
+    } catch (err) {
+      console.error('Failed to download all shared notes:', err);
+      setDownloadError('Could not download all notes. Please try again.');
     } finally {
       setDownloadingAll(false);
     }
@@ -151,6 +154,7 @@ export default function SharedBulkPage() {
         </button>
       </div>
 
+      {downloadError && <p className="share-error" role="alert">{downloadError}</p>}
       {!allowChat && <p className="shared-readonly-note" role="note">This share is read-only. The owner has not enabled chat for this link.</p>}
       <div className="card">
         <h1 className="shared-bulk-title">Shared Notes</h1>

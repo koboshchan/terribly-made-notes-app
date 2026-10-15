@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { getCollection } from '@/lib/db';
 import { isUserAdmin } from '@/lib/admin';
 import { processingQueue, PipelineSettings, defaultPipelineSettings } from '@/lib/queue';
+import { validateModelSettings } from '@/lib/model-settings';
 import { boundedJson, RequestError } from '@/lib/request-limits';
 import { runtimeDefaults, validateRuntime, shareExpiryDays, capabilityDefaults, validateCapabilities, validatePipeline, normalizedPipeline } from '@/lib/runtime-settings';
 
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest) {
     settings.shareExpiryDays = shareExpiryDays(settings.shareExpiryDays);
     validatePipeline(settings.pipeline);
     settings.pipeline = normalizedPipeline(settings.pipeline, defaultPipelineSettings);
-    if (!settings.stt || !settings.llm || !settings.tts) throw new RequestError('Missing model settings');
+    validateModelSettings(settings);
     settings.stt.capabilities = { ...capabilityDefaults(), ...validateCapabilities(settings.stt.capabilities) };
     const globalSettingsCollection = await getCollection('global_settings');
 
