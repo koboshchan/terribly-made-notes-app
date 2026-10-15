@@ -24,7 +24,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        layout: {
+          privacyPageUrl: "/privacy",
+          termsPageUrl: "/terms",
+        },
+      }}
+    >
       <html lang="en">
         <head>
           <meta charSet="utf-8" />

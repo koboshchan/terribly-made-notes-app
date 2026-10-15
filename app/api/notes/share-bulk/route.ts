@@ -1,72 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
-import crypto from 'crypto';
+import { randomBytes } from 'crypto';
 import { getCollection } from '@/lib/db';
+import { boundedJson, RequestError } from '@/lib/request-limits';
+import { shareUrl, configuredShareOptions } from '@/lib/share';
 
-function buildBulkShareUrl(request: NextRequest, token: string) {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/shared/bulk/${token}`;
-  }
-  const forwardedHost = request.headers.get('x-forwarded-host');
-  const forwardedProto = request.headers.get('x-forwarded-proto') ?? 'https';
-  const origin = forwardedHost
-    ? `${forwardedProto.split(',')[0].trim()}://${forwardedHost.split(',')[0].trim()}`
-    : new URL(request.url).origin;
-  return `${origin}/shared/bulk/${token}`;
+async function owner() {
+  const { userId } = await auth();
+  if (!userId) throw new RequestError('Unauthorized', 401);
+  return userId;
 }
-
+function failure(error: unknown) {
+  return NextResponse.json({ error: error instanceof Error ? error.message : 'Sharing failed' }, { status: error instanceof RequestError ? error.status : 500 });
+}
+export async function GET(request: NextRequest) {
+  try {
+    const userId = await owner();
+    const shares = await (await getCollection('shared_note_sets')).find({ userId }).sort({ createdAt: -1 }).limit(100).toArray();
+    return NextResponse.json({ shares: shares.map(s => ({ token: s.shareToken, shareUrl: shareUrl(request, s.shareToken, true), noteIds: s.noteIds.map(String), expiresAt: s.shareExpiresAt, allowChat: s.shareAllowChat === true, shareEnabled: s.shareEnabled })) });
+  } catch (error) { return failure(error); }
+}
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { noteIds } = await request.json();
-    if (!Array.isArray(noteIds) || noteIds.length === 0) {
-      return NextResponse.json({ error: 'At least one note ID is required' }, { status: 400 });
-    }
-
-    const uniqueIds = [...new Set(noteIds)].filter((id) => ObjectId.isValid(id));
-    if (uniqueIds.length === 0) {
-      return NextResponse.json({ error: 'No valid note IDs were provided' }, { status: 400 });
-    }
-
-    const noteObjectIds = uniqueIds.map((id) => new ObjectId(id));
-    const notesCollection = await getCollection('notes');
-    const completedNotes = await notesCollection
-      .find({
-        _id: { $in: noteObjectIds },
-        userId,
-        status: 'completed',
-      })
-      .project({ _id: 1 })
-      .toArray();
-
-    if (completedNotes.length === 0) {
-      return NextResponse.json({ error: 'No completed notes found for sharing' }, { status: 400 });
-    }
-
-    const shareToken = crypto.randomBytes(24).toString('hex');
-    const selectedIds = completedNotes.map((note) => note._id);
-
-    const sharedNoteSetsCollection = await getCollection('shared_note_sets');
-    await sharedNoteSetsCollection.insertOne({
-      userId,
-      shareToken,
-      noteIds: selectedIds,
-      shareEnabled: true,
-      createdAt: new Date(),
-      sharedAt: new Date(),
-    });
-
-    return NextResponse.json({
-      shareUrl: buildBulkShareUrl(request, shareToken),
-      noteCount: selectedIds.length,
-    });
-  } catch (error) {
-    console.error('Failed to create bulk share link:', error);
-    return NextResponse.json({ error: 'Failed to create bulk share link' }, { status: 500 });
-  }
+    const userId = await owner();
+    const body = await boundedJson(request, 16384);
+    if (!Array.isArray(body.noteIds) || !body.noteIds.length || body.noteIds.length > 100 || body.noteIds.some((id: unknown) => typeof id !== 'string' || !/^[a-f0-9]{24}$/.test(id))) throw new RequestError('Select 1 to 100 valid notes');
+    const ids = [...new Set(body.noteIds as string[])].map(id => new ObjectId(id));
+    const notes = await (await getCollection('notes')).find({ _id: { $in: ids }, userId, status: 'completed' }).project({ _id: 1 }).toArray();
+    if (notes.length !== ids.length) throw new RequestError('All selected notes must be completed and owned by you');
+    const sets = await getCollection('shared_note_sets');
+    if (await sets.countDocuments({ userId }) >= 100) throw new RequestError('Maximum 100 shared sets', 429);
+    const shareToken = randomBytes(24).toString('hex');
+    const options = await configuredShareOptions(body);
+    await sets.insertOne({ userId, shareToken, noteIds: ids, shareEnabled: true, ...options, createdAt: new Date(), sharedAt: new Date() });
+    return NextResponse.json({ shareUrl: shareUrl(request, shareToken, true), token: shareToken, noteCount: ids.length, expiresAt: options.shareExpiresAt, allowChat: options.shareAllowChat });
+  } catch (error) { return failure(error); }
+}
+export async function PATCH(request: NextRequest) {
+  try {
+    const userId = await owner();
+    const body = await boundedJson(request, 8192);
+    if (typeof body.token !== 'string' || !/^[a-f0-9]{48}$/.test(body.token)) throw new RequestError('Invalid share token');
+    const shareToken = body.token;
+    const options = await configuredShareOptions(body);
+    const result = await (await getCollection('shared_note_sets')).updateOne({ userId, shareToken: body.token }, { $set: { shareToken, shareEnabled: true, ...options } });
+    if (!result.matchedCount) throw new RequestError('Shared set not found', 404);
+    return NextResponse.json({ shareUrl: shareUrl(request, shareToken, true), token: shareToken, expiresAt: options.shareExpiresAt, allowChat: options.shareAllowChat });
+  } catch (error) { return failure(error); }
+}
+export async function DELETE(request: NextRequest) {
+  try {
+    const userId = await owner();
+    const { token } = await boundedJson(request, 8192);
+    if (typeof token !== 'string' || !/^[a-f0-9]{48}$/.test(token)) throw new RequestError('Invalid share token');
+    const result = await (await getCollection('shared_note_sets')).deleteOne({ userId, shareToken: token });
+    if (!result.deletedCount) throw new RequestError('Shared set not found', 404);
+    return NextResponse.json({ success: true });
+  } catch (error) { return failure(error); }
 }

@@ -16,7 +16,7 @@ You retain any rights you have in your audio and other inputs. You give the oper
 
 Transcripts, summaries, flashcards, quizzes, and chat answers can contain errors or omit important context. Verify them against the recording and course materials before relying on them. They are study aids, not official instruction or medical, legal, or other professional advice. Speech generation is subject to feature availability; configuring a speech provider does not guarantee that every client includes a playback feature.
 
-A share link gives access without requiring the recipient to sign in. Anyone receiving it may forward, copy, or retain the content. Shared chat, where available, sends the shared content and the visitor's messages to an AI provider. Do not share a link unless you have permission to disclose its contents. Deleting a note does not retrieve recipients' saved copies. Sharing controls differ by version; do not assume links expire or can be revoked independently of deleting a note.
+A share link gives access without requiring the recipient to sign in. Anyone receiving it may forward, copy, or retain the content. Shared chat, where you enable it, sends the shared content and the visitor's messages to an AI provider. Do not share a link unless you have permission to disclose its contents. Links expire automatically after the period the operator has set (30 days by default, or never if the operator so chooses), and you can revoke a link earlier. Neither expiry, revocation nor deleting a note retrieves recipients' saved copies.
 
 Keep separate copies of important recordings and notes. Exports and files saved to your phone, computer, cloud drive, or another app are outside Notes' control. Deleting a server note does not automatically clear all offline caches or exports.
 
@@ -26,7 +26,7 @@ Notes currently has no subscription or payment feature. Features may change, pau
 
 Notes is provided as available without a promise of uninterrupted operation, accurate output, successful processing, or permanent storage. To the extent permitted by law, the operator does not give implied warranties of merchantability, fitness for a particular purpose, or non-infringement and is not responsible for indirect or consequential losses caused by use of the service. Nothing here excludes liability or rights that applicable law does not allow to be excluded.
 
-You may delete notes using the available controls. For account closure or other data requests, contact lz@kjt.lol. The Privacy Policy at /privacy describes processing and retention; it does not authorize unrelated uses of your data.
+You may delete notes and revoke shares using the available controls. Deleting your account through Clerk also causes Notes to delete your stored content, as the Privacy Policy describes. For other data requests, contact lz@kjt.lol. The Privacy Policy at /privacy describes processing and retention; it does not authorize unrelated uses of your data.
 
 British Columbia law and applicable Canadian federal law govern these terms, subject to mandatory protections in your jurisdiction. Disputes may be brought in a court with jurisdiction in British Columbia unless applicable law gives you another venue. There is no mandatory arbitration or waiver of class action rights.
 

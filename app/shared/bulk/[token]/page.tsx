@@ -20,7 +20,9 @@ export default function SharedBulkPage() {
   const [notes, setNotes] = useState<SharedNoteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [allowChat, setAllowChat] = useState(true);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchSharedSet = async () => {
@@ -32,6 +34,7 @@ export default function SharedBulkPage() {
 
         const data = await response.json();
         setNotes(data.notes || []);
+        setAllowChat(data.shareAllowChat !== false);
       } catch (err) {
         setError('Shared set not found or unavailable.');
       } finally {
@@ -57,7 +60,7 @@ export default function SharedBulkPage() {
   const sanitizeFileName = (value: string) => {
     return value
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '') || 'shared-notes';
   };
 
@@ -67,6 +70,7 @@ export default function SharedBulkPage() {
     }
 
     setDownloadingAll(true);
+    setDownloadError(null);
     try {
       const detailResponses = await Promise.all(
         notes.map((note) =>
@@ -104,8 +108,9 @@ export default function SharedBulkPage() {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
-    } catch (downloadError) {
-      console.error('Failed to download all shared notes:', downloadError);
+    } catch (err) {
+      console.error('Failed to download all shared notes:', err);
+      setDownloadError('Could not download all notes. Please try again.');
     } finally {
       setDownloadingAll(false);
     }
@@ -135,9 +140,11 @@ export default function SharedBulkPage() {
   return (
     <div className="container">
       <div className="shared-toolbar">
-        <Link href={`/shared/bulk/${token}/chat`} className="btn btn-primary">
-          Chat With All Notes
-        </Link>
+        {allowChat && (
+          <Link href={`/shared/bulk/${token}/chat`} className="btn btn-primary">
+            Chat With All Notes
+          </Link>
+        )}
         <button
           onClick={downloadAllNotes}
           className="btn btn-secondary"
@@ -147,6 +154,8 @@ export default function SharedBulkPage() {
         </button>
       </div>
 
+      {downloadError && <p className="share-error" role="alert">{downloadError}</p>}
+      {!allowChat && <p className="shared-readonly-note" role="note">This share is read-only. The owner has not enabled chat for this link.</p>}
       <div className="card">
         <h1 className="shared-bulk-title">Shared Notes</h1>
         {notes.length === 0 ? (
@@ -164,9 +173,11 @@ export default function SharedBulkPage() {
                   <Link href={`/shared/bulk/${token}/note/${note._id}`} className="btn btn-primary">
                     Open
                   </Link>
-                  <Link href={`/shared/bulk/${token}/chat?noteId=${note._id}`} className="btn btn-secondary">
-                    Chat This Note
-                  </Link>
+                  {allowChat && (
+                    <Link href={`/shared/bulk/${token}/chat?noteId=${note._id}`} className="btn btn-secondary">
+                      Chat This Note
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}
