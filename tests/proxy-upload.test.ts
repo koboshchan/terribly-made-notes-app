@@ -12,3 +12,15 @@ describe('streaming upload proxy exclusions', () => {
     expect(matches({ config, url: '/note/example' })).toBe(true);
   });
 });
+
+// Missing assets can render the authenticated root layout's not-found page.
+describe('favicon not-found authentication', () => {
+  it('runs Clerk on favicon requests that can fall through to the root layout', () => {
+    expect(matches({ config, url: '/favicon.ico' })).toBe(true);
+    expect(matches({ config, url: '/favicon.ico?cache=1' })).toBe(true);
+  });
+  it('still excludes generated static files and image optimization', () => {
+    expect(matches({ config, url: '/_next/static/chunks/example.js' })).toBe(false);
+    expect(matches({ config, url: '/_next/image?url=%2Fposter.png&w=640&q=75' })).toBe(false);
+  });
+});
