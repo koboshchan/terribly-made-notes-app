@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
+import { boundedJson, RequestError } from '@/lib/request-limits';
 
 export async function GET(request: NextRequest) {
   try {
@@ -33,10 +34,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { name, description } = await request.json();
+    const { name, description } = await boundedJson(request, 8192);
 
-    if (!name || !name.trim()) {
-      return NextResponse.json({ error: 'Class name is required' }, { status: 400 });
+    if (typeof name !== 'string' || !name.trim() || name.length > 100 || (description !== undefined && (typeof description !== 'string' || description.length > 1000))) {
+      return NextResponse.json({ error: 'Class name must be 1 to 100 characters; description must be at most 1000 characters' }, { status: 400 });
     }
 
     const classesCollection = await getCollection('user_classes');
@@ -65,8 +66,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Failed to create user class:', error);
     return NextResponse.json(
-      { error: 'Failed to create user class' },
-      { status: 500 }
+      { error: error instanceof RequestError ? error.message : 'Failed to create user class' },
+      { status: error instanceof RequestError ? error.status : 500 }
     );
   }
 }

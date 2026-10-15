@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { renderMarkdown, setupMarkdownRenderer } from '@/lib/markdown';
+import { loadProgress, saveProgress, clearProgress, trimChat } from '@/lib/studyProgress';
 
 interface Note {
   _id: string;
@@ -20,7 +21,7 @@ interface ChatMessage {
 }
 
 export default function NoteChatPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const router = useRouter();
   const params = useParams();
   const [note, setNote] = useState<Note | null>(null);
@@ -29,6 +30,14 @@ export default function NoteChatPage() {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1025px)');
+    const update = () => setWide(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     setupMarkdownRenderer();
@@ -49,7 +58,10 @@ export default function NoteChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatMessages]);
+    if (note && chatMessages.length > 1) {
+      saveProgress(userId, `chat:${note._id}`, trimChat(chatMessages));
+    }
+  }, [chatMessages, note, userId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,6 +74,11 @@ export default function NoteChatPage() {
       if (response.ok) {
         const data = await response.json();
         setNote(data);
+        const saved = loadProgress<ChatMessage[]>(userId, `chat:${data._id}`);
+        if (Array.isArray(saved) && saved.length > 0) {
+          setChatMessages(saved);
+          return;
+        }
         // Initialize chat with welcome message
         setChatMessages([{
           role: 'assistant',
@@ -119,6 +136,7 @@ export default function NoteChatPage() {
   };
 
   const clearChat = () => {
+    if (note) clearProgress(userId, `chat:${note._id}`);
     setChatMessages([{
       role: 'assistant',
       content: `Hi! I'm here to help you with questions about "${note?.title}". What would you like to know?`
@@ -141,9 +159,9 @@ export default function NoteChatPage() {
 
   return (
     <div className="container">
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back to Note
+          <span aria-hidden="true">← </span>Back to Note
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={clearChat} className="btn btn-secondary">
@@ -151,7 +169,7 @@ export default function NoteChatPage() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: showNotePreview() ? '1fr 1fr' : '1fr', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: showNotePreview() ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: '20px' }}>
         {/* Note Content Preview */}
         {showNotePreview() && (
           <div className="card">
@@ -168,6 +186,7 @@ export default function NoteChatPage() {
 
         {/* Chat Panel */}
         <div className="card" style={{ 
+          minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           height: showNotePreview() ? '70vh' : '80vh'
@@ -238,21 +257,24 @@ export default function NoteChatPage() {
           </div>
 
           {/* Chat Input */}
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', minWidth: 0 }}>
             <input
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChatMessage(); }}
               placeholder="Ask a question about this note..."
+              aria-label="Ask a question about this note"
               className="form-input"
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0 }}
               disabled={chatLoading}
             />
             <button
               onClick={sendChatMessage}
               className="btn btn-primary"
+              style={{ flexShrink: 0 }}
               disabled={!chatInput.trim() || chatLoading}
+              aria-label="Send message"
             >
               Send
             </button>
@@ -263,6 +285,6 @@ export default function NoteChatPage() {
   );
 
   function showNotePreview() {
-    return typeof window !== 'undefined' && window.innerWidth > 1024;
+    return wide;
   }
 }

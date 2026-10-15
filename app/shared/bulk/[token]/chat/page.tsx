@@ -32,8 +32,22 @@ function SharedBulkChatContent() {
           : 'Hi! Ask anything about these shared notes. I can use all notes as context.',
       },
     ]);
-    setLoading(false);
-  }, [noteId]);
+    const checkShare = async () => {
+      try {
+        const response = await fetch(`/api/shared-bulk/${token}`);
+        if (!response.ok) {
+          setError('Shared set not found or unavailable.');
+        } else if ((await response.json()).shareAllowChat === false) {
+          setError('This share is read-only. The owner has not enabled chat for this link.');
+        }
+      } catch {
+        // chat API still enforces the setting
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkShare();
+  }, [noteId, token]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -152,12 +166,13 @@ function SharedBulkChatContent() {
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 sendChatMessage();
               }
             }}
             placeholder={noteId ? 'Ask about this note...' : 'Ask about all notes...'}
+            aria-label={noteId ? 'Ask about this note' : 'Ask about all notes'}
             className="form-input"
             disabled={chatLoading}
           />

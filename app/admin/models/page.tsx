@@ -4,10 +4,36 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 
+// Mirrors lib/runtime-settings.ts (server-only; imports db). Keep in sync.
+const RUNTIME_FIELDS = [
+  { key: 'chatTokenPerMinute', label: 'Public chat requests per share link per minute', min: 1, max: 10000, def: 10 },
+  { key: 'chatClientPerMinute', label: 'Public chat requests per client per minute', min: 1, max: 10000, def: 20 },
+  { key: 'chatOwnerPerDay', label: 'Public chat requests per note owner per day', min: 1, max: 1000000, def: 100 },
+  { key: 'audioMaxSeconds', label: 'Maximum audio length (seconds, 36000 = 10 hours)', min: 1, max: 86400, def: 36000 },
+  { key: 'maxProcessingNotes', label: 'Maximum notes processing at once per user', min: 1, max: 1000, def: 5 },
+  { key: 'providerTimeoutMs', label: 'AI provider request timeout (ms)', min: 1000, max: 3600000, def: 300000 },
+  { key: 'mediaTimeoutSeconds', label: 'FFmpeg/media processing timeout (seconds)', min: 1, max: 3600, def: 600 },
+  { key: 'summaryMaxTokens', label: 'Summary max output tokens', min: 256, max: 128000, def: 6000 },
+  { key: 'contextChars', label: 'Chat context size (characters)', min: 4000, max: 2000000, def: 48000 },
+] as const;
+type RuntimeSettings = { [K in typeof RUNTIME_FIELDS[number]['key']]: number };
+const runtimeDefaults = () => Object.fromEntries(RUNTIME_FIELDS.map(f => [f.key, f.def])) as RuntimeSettings;
+const CAPABILITY_FIELDS = [
+  { key: 'maxBytes', label: 'Max bytes per chunk', min: 1024, max: 268435456, def: 20971520 },
+  { key: 'chunkSeconds', label: 'Chunk length (seconds)', min: 2, max: 3600, def: 300 },
+  { key: 'overlapSeconds', label: 'Chunk overlap (seconds)', min: 0, max: 60, def: 2 },
+  { key: 'sampleRate', label: 'Chunk sample rate (Hz)', min: 8000, max: 192000, def: 16000 },
+  { key: 'channels', label: 'Chunk channels', min: 1, max: 2, def: 1 },
+] as const;
+interface SttCapabilities { chunkingEnabled: boolean; maxBytes: number; chunkSeconds: number; overlapSeconds: number; format: 'mp3' | 'wav'; sampleRate: number; channels: number }
+const capabilityDefaults = (): SttCapabilities => ({ chunkingEnabled: false, format: 'mp3', ...Object.fromEntries(CAPABILITY_FIELDS.map(f => [f.key, f.def])) } as SttCapabilities);
+type PipelineStage = { parallel: boolean; concurrency?: number };
+
 interface ModelSettings {
   stt: {
     baseUrl: string;
     apiKey: string;
+    capabilities: SttCapabilities;
     english: {
       modelName: string;
       task: 'transcribe' | 'translate';
@@ -36,23 +62,13 @@ interface ModelSettings {
     sampleRate: number;
   };
   pipeline: {
-    audioNormalization: {
-      parallel: boolean;
-      concurrency?: number;
-    };
-    transcription: {
-      parallel: boolean;
-      concurrency?: number;
-    };
-    summarization: {
-      parallel: boolean;
-      concurrency?: number;
-    };
-    generation: {
-      parallel: boolean;
-      concurrency?: number;
-    };
+    audioNormalization: PipelineStage;
+    transcription: PipelineStage;
+    summarization: PipelineStage;
+    generation: PipelineStage;
   };
+  shareExpiryDays: number | null;
+  runtime: RuntimeSettings;
 }
 
 export default function AdminModelsPage() {
@@ -60,6 +76,7 @@ export default function AdminModelsPage() {
   const router = useRouter();
   const [settings, setSettings] = useState<ModelSettings>({
     stt: {
+      capabilities: capabilityDefaults(),
       baseUrl: 'https://api.openai.com/v1',
       apiKey: '',
       english: {
@@ -95,6 +112,8 @@ export default function AdminModelsPage() {
       summarization: { parallel: true },
       generation: { parallel: true },
     },
+    shareExpiryDays: 30,
+    runtime: runtimeDefaults(),
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -153,11 +172,17 @@ export default function AdminModelsPage() {
           };
         } else {
           data.pipeline = {
-            audioNormalization: { parallel: data.pipeline.audioNormalization?.parallel ?? true },
-            transcription: { parallel: data.pipeline.transcription?.parallel ?? false },
-            summarization: { parallel: data.pipeline.summarization?.parallel ?? true },
-            generation: { parallel: data.pipeline.generation?.parallel ?? true },
+            audioNormalization: { ...data.pipeline.audioNormalization, parallel: data.pipeline.audioNormalization?.parallel ?? true },
+            transcription: { ...data.pipeline.transcription, parallel: data.pipeline.transcription?.parallel ?? false },
+            summarization: { ...data.pipeline.summarization, parallel: data.pipeline.summarization?.parallel ?? true },
+            generation: { ...data.pipeline.generation, parallel: data.pipeline.generation?.parallel ?? true },
           };
+        }
+
+        data.runtime = { ...runtimeDefaults(), ...(data.runtime || {}) };
+        if (data.stt) data.stt.capabilities = { ...capabilityDefaults(), ...(data.stt.capabilities || {}) };
+        if (data.shareExpiryDays === undefined) {
+          data.shareExpiryDays = 30;
         }
 
         setSettings(data);
@@ -242,7 +267,7 @@ export default function AdminModelsPage() {
     }, 3000);
   };
 
-  const updateSettings = (section: keyof ModelSettings, field: string, value: any) => {
+  const updateSettings = (section: Exclude<keyof ModelSettings, 'shareExpiryDays' | 'runtime'>, field: string, value: any) => {
     setSettings(prev => ({
       ...prev,
       [section]: {
@@ -252,6 +277,10 @@ export default function AdminModelsPage() {
     }));
   };
 
+  const updateRuntime = (key: keyof RuntimeSettings, value: number) =>
+    setSettings(prev => ({ ...prev, runtime: { ...prev.runtime, [key]: value } }));
+  const updateCapability = (patch: Partial<SttCapabilities>) =>
+    setSettings(prev => ({ ...prev, stt: { ...prev.stt, capabilities: { ...capabilityDefaults(), ...prev.stt.capabilities, ...patch } } }));
   const updateConcurrency = (stage: keyof ModelSettings['pipeline'], value: number) =>
     setSettings(prev => ({
       ...prev,
@@ -264,6 +293,14 @@ export default function AdminModelsPage() {
         },
       },
     }));
+  const numberField = (id: string, label: string, min: number, max: number, value: number, onChange: (n: number) => void) => (
+    <div className="form-group" key={id}>
+      <label className="form-label" htmlFor={id}>{label}</label>
+      <input id={id} type="number" className="form-input" min={min} max={max} step={1} value={value}
+        onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onChange(Math.trunc(n)); }} />
+      <small style={{ color: '#94a3b8' }}>Allowed {min.toLocaleString()} to {max.toLocaleString()}</small>
+    </div>
+  );
 
   // Helper function to safely get nested STT settings
   const getSafeSTTSettings = () => ({
@@ -420,7 +457,7 @@ export default function AdminModelsPage() {
               <span>⚡</span> Note Processing Pipeline & Concurrency
             </h3>
             <p style={{ color: '#64748b', fontSize: '0.925rem', marginTop: '4px' }}>
-              Control whether each stage of the note processing pipeline runs in parallel (multiple notes processed concurrently) or sequentially (queued, 1 note at a time).
+              Control concurrency for each stage of the processing pipeline. Enter 1 for sequential queue, a positive number for max concurrent notes, or -1 for infinite (all at once).
             </p>
           </div>
 
@@ -431,7 +468,7 @@ export default function AdminModelsPage() {
               'Audio Normalization (FFmpeg)',
               '🎵',
               'Converts uploaded audio files into standardized MP3 (128 kbps, 44.1 kHz).',
-              'When ON, all incoming notes convert audio simultaneously. When OFF, audio conversion runs one note at a time.'
+              'Set -1 to convert all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -440,7 +477,7 @@ export default function AdminModelsPage() {
               'Speech-to-Text Transcription (STT)',
               '🎙️',
               'Transcribes normalized MP3 audio into verbatim text via the configured STT model.',
-              'When ON, multiple transcriptions run simultaneously. When OFF, notes queue up and transcribe one by one to respect API rate limits.'
+              'Set -1 to transcribe all notes simultaneously, 1 for sequential queue (recommended for API rate limits), or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -449,7 +486,7 @@ export default function AdminModelsPage() {
               'AI Summarization & Classification',
               '📝',
               'Generates structured Markdown study notes and assigns subject classes using LLM.',
-              'When ON, summarization runs concurrently for all transcribed notes. When OFF, notes summarize one at a time.'
+              'Set -1 to summarize all notes simultaneously, 1 to process one by one, or 2 to 10.'
             )}
 
             {renderPipelineStepCard(
@@ -458,9 +495,42 @@ export default function AdminModelsPage() {
               'Study Materials Generation (Flashcards & Quiz)',
               '🎴',
               'Generates question/answer flashcards and interactive multiple-choice quiz questions.',
-              'When ON, study materials generate concurrently for all summarized notes. When OFF, generation runs sequentially.'
+              'Set -1 to generate all study materials simultaneously, 1 for sequential generation, or 2 to 10.'
             )}
           </div>
+        </section>
+
+        {/* Runtime limits */}
+        <section style={{ marginBottom: '45px', borderBottom: '2px solid #f1f5f9', paddingBottom: '35px' }}>
+          <h3 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '8px' }}>Runtime Limits</h3>
+          <p style={{ color: '#64748b', fontSize: '0.925rem', marginBottom: '20px' }}>
+            Saved values override environment defaults. There is no per-file upload size cap or upload/storage quota.
+          </p>
+          {RUNTIME_FIELDS.map(f => numberField(`runtime-${f.key}`, f.label, f.min, f.max, settings.runtime?.[f.key] ?? f.def, n => updateRuntime(f.key, n)))}
+
+          <h4 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '24px 0 8px' }}>STT Chunking</h4>
+          <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '12px' }}>
+            Off by default: the whole normalized MP3 (128 kbps, 44.1 kHz stereo) is sent in one request. Your STT provider may impose its own file size limit; enable chunking if it rejects long recordings.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <input type="checkbox" checked={settings.stt.capabilities?.chunkingEnabled ?? false}
+              onChange={(e) => updateCapability({ chunkingEnabled: e.target.checked })} />
+            Split audio into chunks before transcription
+          </label>
+          {settings.stt.capabilities?.chunkingEnabled && (
+            <>
+              <div className="form-group">
+                <label className="form-label" htmlFor="stt-chunk-format">Chunk format</label>
+                <select id="stt-chunk-format" className="form-input" value={settings.stt.capabilities.format}
+                  onChange={(e) => updateCapability({ format: e.target.value as 'mp3' | 'wav' })}>
+                  <option value="mp3">MP3</option>
+                  <option value="wav">WAV</option>
+                </select>
+              </div>
+              {CAPABILITY_FIELDS.map(f => numberField(`stt-${f.key}`, f.label, f.min, f.max, settings.stt.capabilities?.[f.key] ?? f.def, n => updateCapability({ [f.key]: n })))}
+              <small style={{ color: '#94a3b8' }}>Overlap must be less than half the chunk length.</small>
+            </>
+          )}
         </section>
 
         {/* STT Settings */}
@@ -470,8 +540,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-1">Base URL</label>
             <input
+              id="admin-model-1"
               type="url"
               className="form-input"
               value={settings.stt.baseUrl}
@@ -480,8 +551,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-2">API Key</label>
             <input
+              id="admin-model-2"
               type="password"
               className="form-input"
               value={settings.stt.apiKey}
@@ -496,9 +568,10 @@ export default function AdminModelsPage() {
             </h4>
 
             <div className="form-group">
-              <label className="form-label">Model Name</label>
+              <label className="form-label" htmlFor="admin-model-3">Model Name</label>
               {models.stt ? (
               <select
+                id="admin-model-3"
                 className="form-select"
                 value={settings.stt.english?.modelName || ''}
                 onChange={(e) => updateSettings('stt', 'english', { ...getSafeSTTSettings().english, modelName: e.target.value })}
@@ -509,6 +582,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-3"
                 type="text"
                 className="form-input"
                 value={settings.stt.english?.modelName || ''}
@@ -518,8 +592,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Task</label>
+              <label className="form-label" htmlFor="admin-model-4">Task</label>
               <select
+                id="admin-model-4"
                 className="form-select"
                 value={settings.stt.english?.task || 'transcribe'}
                 onChange={(e) => updateSettings('stt', 'english', { ...getSafeSTTSettings().english, task: e.target.value as 'transcribe' | 'translate' })}
@@ -530,8 +605,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Temperature (0.0 - 1.0)</label>
+              <label className="form-label" htmlFor="admin-model-5">Temperature (0.0 - 1.0)</label>
               <input
+                id="admin-model-5"
                 type="number"
                 min="0"
                 max="1"
@@ -550,9 +626,10 @@ export default function AdminModelsPage() {
             </h4>
 
             <div className="form-group">
-              <label className="form-label">Model Name</label>
+              <label className="form-label" htmlFor="admin-model-6">Model Name</label>
               {models.stt ? (
               <select
+                id="admin-model-6"
                 className="form-select"
                 value={settings.stt.other?.modelName || ''}
                 onChange={(e) => updateSettings('stt', 'other', { ...getSafeSTTSettings().other, modelName: e.target.value })}
@@ -563,6 +640,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-6"
                 type="text"
                 className="form-input"
                 value={settings.stt.other?.modelName || ''}
@@ -572,8 +650,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Task</label>
+              <label className="form-label" htmlFor="admin-model-7">Task</label>
               <select
+                id="admin-model-7"
                 className="form-select"
                 value={settings.stt.other?.task || 'transcribe'}
                 onChange={(e) => updateSettings('stt', 'other', { ...getSafeSTTSettings().other, task: e.target.value as 'transcribe' | 'translate' })}
@@ -584,8 +663,9 @@ export default function AdminModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Temperature (0.0 - 1.0)</label>
+              <label className="form-label" htmlFor="admin-model-8">Temperature (0.0 - 1.0)</label>
               <input
+                id="admin-model-8"
                 type="number"
                 min="0"
                 max="1"
@@ -605,8 +685,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-9">Base URL</label>
             <input
+              id="admin-model-9"
               type="url"
               className="form-input"
               value={settings.llm.baseUrl}
@@ -615,8 +696,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-10">API Key</label>
             <input
+              id="admin-model-10"
               type="password"
               className="form-input"
               value={settings.llm.apiKey}
@@ -625,12 +707,13 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Summarization Model</label>
+            <label className="form-label" htmlFor="admin-model-11">Summarization Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for generating note summaries from transcriptions
             </p>
             {models.llm ? (
               <select
+                id="admin-model-11"
                 className="form-select"
                 value={settings.llm.summarizationModel}
                 onChange={(e) => updateSettings('llm', 'summarizationModel', e.target.value)}
@@ -641,6 +724,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-11"
                 type="text"
                 className="form-input"
                 value={settings.llm.summarizationModel}
@@ -650,12 +734,13 @@ export default function AdminModelsPage() {
           </div>
 
             <div className="form-group">
-            <label className="form-label">Quiz & Flashcard Model</label>
+            <label className="form-label" htmlFor="admin-model-12">Quiz & Flashcard Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for generating flashcards and quiz questions
             </p>
             {models.llm ? (
               <select
+                id="admin-model-12"
                 className="form-select"
                 value={settings.llm.quizModel}
                 onChange={(e) => updateSettings('llm', 'quizModel', e.target.value)}
@@ -666,6 +751,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-12"
                 type="text"
                 className="form-input"
                 value={settings.llm.quizModel}
@@ -675,12 +761,13 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Chat Model</label>
+            <label className="form-label" htmlFor="admin-model-13">Chat Model</label>
             <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
               Used for conversational AI chat about the note
             </p>
             {models.llm ? (
               <select
+                id="admin-model-13"
                 className="form-select"
                 value={settings.llm.chatModel}
                 onChange={(e) => updateSettings('llm', 'chatModel', e.target.value)}
@@ -691,6 +778,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-13"
                 type="text"
                 className="form-input"
                 value={settings.llm.chatModel}
@@ -707,8 +795,9 @@ export default function AdminModelsPage() {
           </h3>
 
           <div className="form-group">
-            <label className="form-label">Base URL</label>
+            <label className="form-label" htmlFor="admin-model-14">Base URL</label>
             <input
+              id="admin-model-14"
               type="url"
               className="form-input"
               value={settings.tts.baseUrl}
@@ -717,8 +806,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label" htmlFor="admin-model-15">API Key</label>
             <input
+              id="admin-model-15"
               type="password"
               className="form-input"
               value={settings.tts.apiKey}
@@ -727,9 +817,10 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Model Name</label>
+            <label className="form-label" htmlFor="admin-model-16">Model Name</label>
             {models.tts ? (
               <select
+                id="admin-model-16"
                 className="form-select"
                 value={settings.tts.modelName}
                 onChange={(e) => updateSettings('tts', 'modelName', e.target.value)}
@@ -740,6 +831,7 @@ export default function AdminModelsPage() {
               </select>
             ) : (
               <input
+                id="admin-model-16"
                 type="text"
                 className="form-input"
                 value={settings.tts.modelName}
@@ -749,8 +841,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Voice</label>
+            <label className="form-label" htmlFor="admin-model-17">Voice</label>
             <input
+              id="admin-model-17"
               type="text"
               className="form-input"
               value={settings.tts.voice}
@@ -759,8 +852,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Response Format</label>
+            <label className="form-label" htmlFor="admin-model-18">Response Format</label>
             <input
+              id="admin-model-18"
               type="text"
               className="form-input"
               value={settings.tts.responseFormat}
@@ -769,8 +863,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Speed (0.5 - 2.0)</label>
+            <label className="form-label" htmlFor="admin-model-19">Speed (0.5 - 2.0)</label>
             <input
+              id="admin-model-19"
               type="number"
               min="0.5"
               max="2.0"
@@ -782,8 +877,9 @@ export default function AdminModelsPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Sample Rate (8000 - 48000)</label>
+            <label className="form-label" htmlFor="admin-model-20">Sample Rate (8000 - 48000)</label>
             <input
+              id="admin-model-20"
               type="number"
               min="8000"
               max="48000"
@@ -793,6 +889,44 @@ export default function AdminModelsPage() {
               onChange={(e) => updateSettings('tts', 'sampleRate', parseInt(e.target.value))}
             />
           </div>
+        </section>
+
+        <section style={{ marginBottom: '40px' }}>
+          <h3 style={{ marginBottom: '8px' }}>Share Links</h3>
+          <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '16px' }}>
+            Expiry applies when a share is created or updated. Existing shares keep their current expiry.
+          </p>
+          <div className="form-group">
+            <label className="form-label" htmlFor="share-expiry-never">
+              <input
+                id="share-expiry-never"
+                type="checkbox"
+                checked={settings.shareExpiryDays === null}
+                onChange={(e) => setSettings(prev => ({ ...prev, shareExpiryDays: e.target.checked ? null : 30 }))}
+                style={{ marginRight: '8px' }}
+              />
+              Never expire
+            </label>
+          </div>
+          {settings.shareExpiryDays !== null && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="share-expiry-days">Expire after (days, 1-365)</label>
+              <input
+                id="share-expiry-days"
+                type="number"
+                min="1"
+                max="365"
+                step="1"
+                className="form-input"
+                value={settings.shareExpiryDays}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  const days = Number.isNaN(n) ? 1 : Math.min(365, Math.max(1, n));
+                  setSettings(prev => ({ ...prev, shareExpiryDays: days }));
+                }}
+              />
+            </div>
+          )}
         </section>
 
         <div style={{ textAlign: 'center' }}>

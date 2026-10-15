@@ -157,9 +157,9 @@ function MultiNoteChatContent() {
 
   return (
     <div className="container">
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={() => router.back()} className="btn btn-secondary">
-          ← Back to Notes
+          <span aria-hidden="true">← </span>Back to Notes
         </button>
         <div style={{ flex: 1 }} />
         <button onClick={clearChat} className="btn btn-secondary">
@@ -178,7 +178,7 @@ function MultiNoteChatContent() {
           <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
             {notes.map(note => (
               <li key={note._id} style={{ marginBottom: '5px' }}>
-                <strong>{note.title}</strong>: {note.description.substring(0, 100)}...
+                <strong>{note.title}</strong>: {(note.description || '').substring(0, 100)}{(note.description || '').length > 100 ? '...' : ''}
               </li>
             ))}
           </ul>
@@ -247,20 +247,22 @@ function MultiNoteChatContent() {
         </div>
 
         {/* Chat Input */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', minWidth: 0 }}>
           <input
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChatMessage(); }}
             placeholder="Ask a question about these notes..."
+            aria-label="Ask a question about these notes"
             className="form-input"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 0 }}
             disabled={chatLoading}
           />
           <button
             onClick={sendChatMessage}
             className="btn btn-primary"
+            style={{ flexShrink: 0 }}
             disabled={!chatInput.trim() || chatLoading}
           >
             Send

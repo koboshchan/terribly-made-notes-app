@@ -1,53 +1,23 @@
-import { getCollection } from './db';
+import { clerkClient } from '@clerk/nextjs/server';
 
+// Clerk private metadata is the live source of truth, matching cal's admin check.
+// Never trust registration order, session claims, or cached Mongo admin flags.
 export async function isUserAdmin(userId: string): Promise<boolean> {
+  if (!userId) return false;
   try {
-    const usersCollection = await getCollection('users');
-    
-    // Check if this is the first user ever registered
-    const userCount = await usersCollection.countDocuments();
-    if (userCount === 0) {
-      // If no users exist, register this user as the first admin
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: true,
-        registeredAt: new Date(),
+    const client = await clerkClient();
+    const user = await client.users.getUser(userId);
+    // Match cal: initialize only a missing key, preserving all other metadata
+    // and never overwriting an admin value already set manually in Clerk.
+    if (user.privateMetadata?.admin === undefined) {
+      await client.users.updateUserMetadata(userId, {
+        privateMetadata: { ...user.privateMetadata, admin: false },
       });
-      return true;
+      return false;
     }
-    
-    // Check if user is already marked as admin
-    const user = await usersCollection.findOne({ userId });
-    if (user) {
-      return user.isAdmin === true;
-    }
-    
-    // Check if this is the first user registered
-    const adminUser = await usersCollection.findOne({ isAdmin: true });
-    if (!adminUser) {
-      // No admin exists, make this user admin
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: true,
-        registeredAt: new Date(),
-      });
-      return true;
-    } else if (adminUser.userId === userId) {
-      return true;
-    }
-    
-    // Register user as non-admin
-    if (!user) {
-      await usersCollection.insertOne({
-        userId,
-        isAdmin: false,
-        registeredAt: new Date(),
-      });
-    }
-    
-    return false;
+    return user.privateMetadata.admin === true;
   } catch (error) {
-    console.error('Error checking admin status:', error);
+    console.error('Error checking Clerk admin metadata:', error);
     return false;
   }
 }

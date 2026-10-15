@@ -2,78 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { ObjectId } from 'mongodb';
 import { getCollection } from '@/lib/db';
-import { randomBytes } from 'crypto';
+import { newShortcutSecret, shortcutExpiry } from '@/lib/shortcut-tokens';
+import { boundedJson, RequestError } from '@/lib/request-limits';
 
-export async function GET(request: NextRequest) {
-  try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const tokensCollection = await getCollection('shortcut_tokens');
-    const tokens = await tokensCollection
-      .find({ userId })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    return NextResponse.json(tokens);
-  } catch (error) {
-    console.error('Failed to fetch shortcut tokens:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch shortcut tokens' },
-      { status: 500 }
-    );
-  }
+export async function GET() {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const collection = await getCollection('shortcut_tokens');
+  const tokens = await collection.find({ userId }, { projection: { token: 0, tokenDigest: 0 } }).sort({ createdAt: -1 }).toArray();
+  return NextResponse.json(tokens);
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { name, description } = await request.json();
-
-    if (!name || !name.trim()) {
-      return NextResponse.json({ error: 'Token name is required' }, { status: 400 });
-    }
-
-    // Generate a secure random token
-    const token = randomBytes(32).toString('hex');
-
-    const tokensCollection = await getCollection('shortcut_tokens');
-    
-    // Check if token name already exists for this user
-    const existingToken = await tokensCollection.findOne({ 
-      userId, 
-      name: name.trim() 
-    });
-
-    if (existingToken) {
-      return NextResponse.json({ error: 'Token name already exists' }, { status: 400 });
-    }
-
-    const newToken = {
-      _id: new ObjectId(),
-      userId,
-      name: name.trim(),
-      description: description?.trim() || '',
-      token,
-      createdAt: new Date(),
-      lastUsed: null,
-      isActive: true,
-    };
-
-    await tokensCollection.insertOne(newToken);
-
-    return NextResponse.json(newToken);
-  } catch (error) {
-    console.error('Failed to create shortcut token:', error);
-    return NextResponse.json(
-      { error: 'Failed to create shortcut token' },
-      { status: 500 }
-    );
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { name, description, expiresInDays = 90 } = await boundedJson(request, 8192);
+    if (typeof name !== 'string' || !name.trim() || name.length > 100 || (description !== undefined && (typeof description !== 'string' || description.length > 1000))) throw new RequestError('Invalid token name or description');
+    const expiresAt = shortcutExpiry(expiresInDays);
+    const collection = await getCollection('shortcut_tokens');
+    await collection.createIndex({ tokenDigest: 1 }, { unique: true, sparse: true });
+    await collection.createIndex({ userId: 1, name: 1 }, { unique: true });
+    if (await collection.countDocuments({ userId }) >= 20) throw new RequestError('Maximum 20 shortcut tokens', 429);
+    const { token, ...secretFields } = newShortcutSecret();
+    const record = { _id: new ObjectId(), userId, name: name.trim(), description: description?.trim() || '', ...secretFields, scopes: ['upload'], expiresAt, createdAt: new Date(), lastUsed: null, isActive: true };
+    await collection.insertOne(record);
+    const { tokenDigest: _digest, ...safeRecord } = record;
+    // The bearer secret is shown only here. It cannot be recovered from storage.
+    return NextResponse.json({ ...safeRecord, token }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.code === 11000 ? 'Token name already exists' : error instanceof Error ? error.message : 'Token creation failed' }, { status: error instanceof RequestError ? error.status : 400 });
   }
 }

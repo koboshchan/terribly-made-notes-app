@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
+import { isUserAdmin } from '@/lib/admin';
+import { allowedProviderUrl } from '@/lib/provider-url';
 
 export async function POST(request: NextRequest) {
   try {
@@ -8,7 +10,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!await isUserAdmin(userId)) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
     const { baseUrl, apiKey, type } = await request.json();
+    const approvedUrl = allowedProviderUrl(baseUrl);
+    if (!approvedUrl || typeof apiKey !== 'string' || apiKey.length > 4096) {
+      return NextResponse.json({ error: 'Provider must be configured in PROVIDER_BASE_URL_ALLOWLIST' }, { status: 400 });
+    }
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json(
@@ -18,7 +27,9 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      const response = await fetch(`${approvedUrl}/models`, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(15000),
         headers: {
           'Authorization': `Bearer ${apiKey}`,
         },

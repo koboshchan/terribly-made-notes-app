@@ -22,9 +22,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        layout: {
+          privacyPageUrl: "/privacy",
+          termsPageUrl: "/terms",
+        },
+      }}
+    >
       <html lang="en">
         <head>
+          <meta charSet="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         </head>
         <body>
@@ -54,6 +62,10 @@ export default function RootLayout({
           <main>
             {children}
           </main>
+          <footer className="container" style={{ padding: '32px 20px', fontSize: '14px', opacity: 0.75, display: 'flex', gap: '16px' }}>
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
+          </footer>
         </body>
       </html>
     </ClerkProvider>
