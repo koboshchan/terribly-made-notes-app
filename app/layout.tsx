@@ -1,3 +1,5 @@
+import styles from "./components/legal/legal.module.css";
+import LegalFooter from "./components/legal/LegalFooter";
 import type { Metadata } from "next";
 import {
   ClerkProvider,
@@ -59,13 +61,16 @@ export default function RootLayout({
               </div>
             </div>
           </header>
+          <SignedOut>
+            <p className={styles.signupNotice}>
+              Before signing up, read the <Link href="/terms">Terms</Link> and{" "}
+              <Link href="/privacy">Privacy Policy</Link>.
+            </p>
+          </SignedOut>
           <main>
             {children}
           </main>
-          <footer className="container" style={{ padding: '32px 20px', fontSize: '14px', opacity: 0.75, display: 'flex', gap: '16px' }}>
-            <Link href="/privacy">Privacy</Link>
-            <Link href="/terms">Terms</Link>
-          </footer>
+          <LegalFooter />
         </body>
       </html>
     </ClerkProvider>

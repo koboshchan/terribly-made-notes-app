@@ -9,7 +9,7 @@ export default clerkMiddleware(async (auth) => {
 
 export const config = {
   matcher: [
-    '/((?!api/(?:upload|shortcuts)(?:/|$)|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/(?:upload|shortcuts)(?:/|$)|_next/static|_next/image|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     '/trpc/:path*',
   ],
 }
